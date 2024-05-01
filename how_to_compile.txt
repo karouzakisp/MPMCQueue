@@ -1,0 +1,1 @@
+g++ halfhalf.c pairwise.c harness.cpp -I../include/rigtorp/ -O3
