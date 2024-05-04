@@ -131,11 +131,18 @@ void * benchmark(int id, int nprocs) {
 
   int i;
   for (i = 0; i < nops / nprocs; ++i) {
-    q.try_push(val);
-       
+    if(q.try_push(val) ){
+      //printf("Pushing %d\n", id + 1); 
+    }else{
+      printf("Failed to push %d\n", id + 1);
+    }
     delay_exec(&state);
-
-    q.try_pop(val);
+    
+    if(q.try_pop(val) ){
+      //printf("Popping %d\n", id + 1); 
+    }else{
+      printf("Queue is empty can't pop %d\n", id + 1);
+    }
     delay_exec(&state);
   }
 
@@ -192,7 +199,22 @@ int verify(int nprocs, void ** results) {
     }
   }
 
-  if (ret != 1) fprintf(stdout, "PASSED\n");
+  if (ret != 1) {
+    fprintf(stdout, "PASSED\n");
+    puts("Printing array --> ");
+    for(int k = 0; k < nprocs; k++){
+      int res = (int) (intptr_t) results[k];
+      printf("%d\n", res);
+    }
+
+  }
+  else{
+    puts("Printing array --> ");
+    for(int k = 0; k < nprocs; k++){
+      int res = (int) (intptr_t) results[k];
+      printf("%d\n", res);
+    }
+  }
   return ret;
 #endif
 }
