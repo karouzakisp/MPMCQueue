@@ -1,25 +1,16 @@
-OBJ_DIR := obj
 INCLUDE_DIR := include
-BIN_DIR := .
+SRC_DIR := src
 
-CC = g++
-CFLAGS = -g -Wall -O3 -pthread
-LDLIBS = -lpthread -lm 
-
-
-C_SRC = $(wildcard $(SRC_DIR)/*.c)
-CPP_SRC = $(wildcard $(SRC_DIR)/*.cpp)
-
-OBJS:= $(SRC:$(C_SRC)/%.c=$(OBJ_DIR)/%.o)  
-OBJS = $(CPP_SRC:.cpp=$(OBJ_DIR)/%.o) $(C_SRC:.c=.o) 
-
-TARGET = mpmcqueue 
+CC := g++
+CFLAGS := -g -Wall -pthread -I$(INCLUDE_DIR) -O0 #-O3
+LDLIBS := -lpthread -lm
 
 
+TARGET := mpmcqueue_bench
+SRCS := $(SRC_DIR)/halfhalf.c $(SRC_DIR)/pairwise.c $(SRC_DIR)/harness.cpp
 
-mpmcqueue: 
-	g++ -O3 $(CFLAGS) $(OBJS) $^ -o $(TARGET)
+$(TARGET): $(SRCS)
+	$(CC) $(CFLAGS) $^ -o $@ $(LDLIBS)
 
 clean:
-	rm mpmcq; 
-	rm -rf OBJ_DIR;
+	$(RM) $(TARGET)

@@ -5,3 +5,4 @@ cmake-build-*
 .idea/
 .project
 *~
+mpmcqueue_bench
