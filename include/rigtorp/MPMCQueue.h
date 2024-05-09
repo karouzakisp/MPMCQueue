@@ -38,6 +38,14 @@ SOFTWARE.
 #endif
 #endif
 
+namespace {
+    // Toggle Memory Ordering Here
+    // constexpr auto LoadMemoryOrder = std::memory_order_acquire;
+    // constexpr auto StoreMemoryOrder = std::memory_order_release;
+    constexpr auto LoadMemoryOrder = std::memory_order_seq_cst;
+    constexpr auto StoreMemoryOrder = std::memory_order_seq_cst;
+}
+
 namespace rigtorp {
 namespace mpmc {
 #if defined(__cpp_lib_hardware_interference_size) && !defined(__APPLE__)
@@ -168,27 +176,27 @@ public:
                   "T must be nothrow constructible with Args&&...");
     auto const head = head_.fetch_add(1);
     auto &slot = slots_[idx(head)];
-    while (turn(head) * 2 != slot.turn.load(std::memory_order_acquire))
+    while (turn(head) * 2 != slot.turn.load(LoadMemoryOrder))
       ;
     slot.construct(std::forward<Args>(args)...);
-    slot.turn.store(turn(head) * 2 + 1, std::memory_order_release);
+    slot.turn.store(turn(head) * 2 + 1, StoreMemoryOrder);
   }
 
   template <typename... Args> bool try_emplace(Args &&...args) noexcept {
     static_assert(std::is_nothrow_constructible<T, Args &&...>::value,
                   "T must be nothrow constructible with Args&&...");
-    auto head = head_.load(std::memory_order_acquire);
+    auto head = head_.load(LoadMemoryOrder);
     for (;;) {
       auto &slot = slots_[idx(head)];
-      if (turn(head) * 2 == slot.turn.load(std::memory_order_acquire)) {
+      if (turn(head) * 2 == slot.turn.load(LoadMemoryOrder)) {
         if (head_.compare_exchange_strong(head, head + 1)) {
           slot.construct(std::forward<Args>(args)...);
-          slot.turn.store(turn(head) * 2 + 1, std::memory_order_release);
+          slot.turn.store(turn(head) * 2 + 1, StoreMemoryOrder);
           return true;
         }
       } else {
         auto const prevHead = head;
-        head = head_.load(std::memory_order_acquire);
+        head = head_.load(LoadMemoryOrder);
         if (head == prevHead) {
           return false;
         }
@@ -225,27 +233,27 @@ public:
   void pop(T &v) noexcept {
     auto const tail = tail_.fetch_add(1);
     auto &slot = slots_[idx(tail)];
-    while (turn(tail) * 2 + 1 != slot.turn.load(std::memory_order_acquire))
+    while (turn(tail) * 2 + 1 != slot.turn.load(LoadMemoryOrder))
       ;
     v = slot.move();
     slot.destroy();
-    slot.turn.store(turn(tail) * 2 + 2, std::memory_order_release);
+    slot.turn.store(turn(tail) * 2 + 2, StoreMemoryOrder);
   }
 
   bool try_pop(T &v) noexcept {
-    auto tail = tail_.load(std::memory_order_acquire);
+    auto tail = tail_.load(LoadMemoryOrder);
     for (;;) {
       auto &slot = slots_[idx(tail)];
-      if (turn(tail) * 2 + 1 == slot.turn.load(std::memory_order_acquire)) {
+      if (turn(tail) * 2 + 1 == slot.turn.load(LoadMemoryOrder)) {
         if (tail_.compare_exchange_strong(tail, tail + 1)) {
           v = slot.move();
           slot.destroy();
-          slot.turn.store(turn(tail) * 2 + 2, std::memory_order_release);
+          slot.turn.store(turn(tail) * 2 + 2, StoreMemoryOrder);
           return true;
         }
       } else {
         auto const prevTail = tail;
-        tail = tail_.load(std::memory_order_acquire);
+        tail = tail_.load(LoadMemoryOrder);
         if (tail == prevTail) {
           return false;
         }
@@ -259,8 +267,10 @@ public:
   /// effort guess until all reader and writer threads have been joined.
   ptrdiff_t size() const noexcept {
     // TODO: How can we deal with wrapped queue on 32bit?
-    return static_cast<ptrdiff_t>(head_.load(std::memory_order_relaxed) -
-                                  tail_.load(std::memory_order_relaxed));
+    // return static_cast<ptrdiff_t>(head_.load(std::memory_order_relaxed) -
+                                //   tail_.load(std::memory_order_relaxed));
+    return static_cast<ptrdiff_t>(head_.load(LoadMemoryOrder) -
+                                  tail_.load(StoreMemoryOrder));
   }
 
   /// Returns true if the queue is empty.

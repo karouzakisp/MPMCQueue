@@ -7,5 +7,4 @@
 #define LOGN_OPS 7
 #endif
 
-static long nops;
-
+// static long nops;

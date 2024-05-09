@@ -13,7 +13,7 @@
 #include "../include/rigtorp/delay.h"
 #include "../include/rigtorp/MPMCQueue.h"
 
-#define VERIFY 1 
+#define VERIFY 1
 
 #ifndef LOGN_OPS
 #define LOGN_OPS 5
@@ -44,7 +44,7 @@ static double times[MAX_ITERS];
 static double means[MAX_ITERS];
 static double covs[MAX_ITERS];
 static volatile int target;
-  
+
 using namespace rigtorp;
 
 MPMCQueue<void *> q(SZ);
@@ -159,7 +159,7 @@ void init(int nprocs, int logn) {
   }
 
   printf("  Number of operations: %ld\n", nops);
- 
+
 }
 
 void thread_init(int id, int nprocs) {
@@ -327,4 +327,3 @@ int main(int argc, const char *argv[])
   pthread_barrier_destroy(&barrier);
   return verify(nprocs, res);
 }
-
