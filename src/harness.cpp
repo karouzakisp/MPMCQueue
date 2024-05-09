@@ -131,18 +131,14 @@ void * benchmark(int id, int nprocs) {
 
   int i;
   for (i = 0; i < nops / nprocs; ++i) {
-    if(q.try_push(val) ){
+    q.push(val); 
       //printf("Pushing %d\n", id + 1); 
-    }else{
-      printf("Failed to push %d\n", id + 1);
-    }
     delay_exec(&state);
     
-    if(q.try_pop(val) ){
-      //printf("Popping %d\n", id + 1); 
-    }else{
-      printf("Queue is empty can't pop %d\n", id + 1);
-    }
+    q.pop(val); 
+    //}else{
+    //  printf("Queue is empty can't pop %d\n", id + 1);
+    
     delay_exec(&state);
   }
 
