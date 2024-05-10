@@ -1,19 +1,17 @@
-#include <math.h>
-#include <stdio.h>
-#include <limits.h>
-#include <stdlib.h>
-#include <stdint.h>
-#include <unistd.h>
-#include <pthread.h>
-#include <sys/time.h>
-#include <assert.h>
+#include "../include/rigtorp/MPMCQueue.h"
+#include "../include/rigtorp/benchmark.h"
 #include "../include/rigtorp/bits.h"
 #include "../include/rigtorp/cpumap.h"
-#include "../include/rigtorp/benchmark.h"
 #include "../include/rigtorp/delay.h"
-#include "../include/rigtorp/MPMCQueue.h"
-
-#define VERIFY 1
+#include <assert.h>
+#include <limits.h>
+#include <math.h>
+#include <pthread.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/time.h>
+#include <unistd.h>
 
 #ifndef LOGN_OPS
 #define LOGN_OPS 5
@@ -36,8 +34,7 @@ static long nops;
 #define COV_THRESHOLD 0.02
 #endif
 
-#define SZ 100000000
-
+#define SZ 100'000'000
 
 static pthread_barrier_t barrier;
 static double times[MAX_ITERS];
@@ -49,15 +46,13 @@ using namespace rigtorp;
 
 MPMCQueue<void *> q(SZ);
 
-static size_t elapsed_time(size_t us)
-{
+static size_t elapsed_time(size_t us) {
   struct timeval t;
   gettimeofday(&t, NULL);
   return t.tv_sec * 1000000 + t.tv_usec - us;
 }
 
-static double compute_mean(const double * times)
-{
+static double compute_mean(const double *times) {
   int i;
   double sum = 0;
 
@@ -68,8 +63,7 @@ static double compute_mean(const double * times)
   return sum / NUM_ITERS;
 }
 
-static double compute_cov(const double * times, double mean)
-{
+static double compute_cov(const double *times, double mean) {
   double variance = 0;
 
   int i;
@@ -79,13 +73,13 @@ static double compute_cov(const double * times, double mean)
 
   variance /= NUM_ITERS;
 
-  double cov = sqrt(variance);;
+  double cov = sqrt(variance);
+  ;
   cov /= mean;
   return cov;
 }
 
-static size_t reduce_min(long val, int id, int nprocs)
-{
+static size_t reduce_min(long val, int id, int nprocs) {
   static long buffer[MAX_PROCS];
 
   buffer[id] = val;
@@ -94,14 +88,14 @@ static size_t reduce_min(long val, int id, int nprocs)
   long min = LONG_MAX;
   int i;
   for (i = 0; i < nprocs; ++i) {
-    if (buffer[i] < min) min = buffer[i];
+    if (buffer[i] < min)
+      min = buffer[i];
   }
 
   return min;
 }
 
-static void report(int id, int nprocs, int i, long us)
-{
+static void report(int id, int nprocs, int i, long us) {
   long ms = reduce_min(us, id, nprocs);
 
   if (id == 0) {
@@ -123,33 +117,41 @@ static void report(int id, int nprocs, int i, long us)
   pthread_barrier_wait(&barrier);
 }
 
-void * benchmark(int id, int nprocs) {
-  void * val = (void *) (intptr_t) (id + 1);
-
+#include <iostream>
+void *benchmark(int id, int nprocs) {
+  void *val = (void *)(intptr_t)(id + 1);
   delay_t state;
   delay_init(&state, id);
 
   int i;
   for (i = 0; i < nops / nprocs; ++i) {
-    q.push(val); 
-      //printf("Pushing %d\n", id + 1); 
+    bool ok;
+    // q.push(val);
+    ok = q.try_push(val);
+    if (!ok) {
+      std::cout << "id:" << id + 1 << " fail try_push("
+                << reinterpret_cast<intptr_t>(val) << ") \n";
+    }
     delay_exec(&state);
-    
-    q.pop(val); 
-    //}else{
-    //  printf("Queue is empty can't pop %d\n", id + 1);
-    
+
+    // q.pop(ret);
+    void *ret{nullptr};
+    ok = q.try_pop(ret);
+    if (!ok) {
+      std::cout << "id:" << id + 1 << " fail try_pop() -> "
+                << reinterpret_cast<intptr_t>(ret) << "\n";
+    }
     delay_exec(&state);
   }
 
   return val;
 }
 
-
 void init(int nprocs, int logn) {
 
   /** Use 10^5 as default input size. */
-  if (logn == 0) logn = LOGN_OPS;
+  if (logn == 0)
+    logn = LOGN_OPS;
 
   /** Compute the number of ops to perform. */
   nops = 1;
@@ -159,26 +161,19 @@ void init(int nprocs, int logn) {
   }
 
   printf("  Number of operations: %ld\n", nops);
-
 }
 
-void thread_init(int id, int nprocs) {
-  ;
-}
+void thread_init(int id, int nprocs) { ; }
 
-void thread_exit(int id, int nprocs) {
-  ;
-}
-
+void thread_exit(int id, int nprocs) { ; }
 
 #ifdef VERIFY
-static int compare(const void * a, const void * b) {
-  return *(long *) a - *(long *) b;
+static int compare(const void *a, const void *b) {
+  return *(long *)a - *(long *)b;
 }
 #endif
 
-
-int verify(int nprocs, void ** results) {
+int verify(int nprocs, void **results) {
 #ifndef VERIFY
   return 0;
 #else
@@ -188,7 +183,7 @@ int verify(int nprocs, void ** results) {
   int ret = 0;
 
   for (i = 0; i < nprocs; ++i) {
-    int res = (int) (intptr_t) results[i];
+    int res = (int)(intptr_t)results[i];
     if (res != i + 1) {
       fprintf(stderr, "expected %d but received %d\n", i + 1, res);
       ret = 1;
@@ -198,16 +193,15 @@ int verify(int nprocs, void ** results) {
   if (ret != 1) {
     fprintf(stdout, "PASSED\n");
     puts("Printing array --> ");
-    for(int k = 0; k < nprocs; k++){
-      int res = (int) (intptr_t) results[k];
+    for (int k = 0; k < nprocs; k++) {
+      int res = (int)(intptr_t)results[k];
       printf("%d\n", res);
     }
 
-  }
-  else{
+  } else {
     puts("Printing array --> ");
-    for(int k = 0; k < nprocs; k++){
-      int res = (int) (intptr_t) results[k];
+    for (int k = 0; k < nprocs; k++) {
+      int res = (int)(intptr_t)results[k];
       printf("%d\n", res);
     }
   }
@@ -215,10 +209,7 @@ int verify(int nprocs, void ** results) {
 #endif
 }
 
-
-
-static void * thread(void * bits)
-{
+static void *thread(void *bits) {
   int id = bits_hi(bits);
   int nprocs = bits_lo(bits);
 
@@ -233,7 +224,7 @@ static void * thread(void * bits)
   pthread_barrier_wait(&barrier);
 
   int i;
-  void * result = NULL;
+  void *result = NULL;
 
   for (i = 0; i < MAX_ITERS && target == 0; ++i) {
     long us = elapsed_time(0);
@@ -247,8 +238,7 @@ static void * thread(void * bits)
   return result;
 }
 
-int main(int argc, const char *argv[])
-{
+int main(int argc, const char *argv[]) {
   int nprocs = 0;
   int n = 0;
 
@@ -265,7 +255,8 @@ int main(int argc, const char *argv[])
     nprocs = sysconf(_SC_NPROCESSORS_ONLN);
   }
 
-  if (nprocs <= 0) return 1;
+  if (nprocs <= 0)
+    return 1;
   else {
     /** Set concurrency level. */
     pthread_setconcurrency(nprocs);
@@ -286,7 +277,7 @@ int main(int argc, const char *argv[])
   init(nprocs, n);
 
   pthread_t ths[nprocs];
-  void * res[nprocs];
+  void *res[nprocs];
 
   int i;
   for (i = 1; i < nprocs; i++) {
