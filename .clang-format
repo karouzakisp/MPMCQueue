@@ -1,1 +1,13 @@
+---
+Language: Cpp
 BasedOnStyle: LLVM
+ColumnLimit: 0
+AllowShortBlocksOnASingleLine: Always
+AllowShortEnumsOnASingleLine: true
+AllowShortFunctionsOnASingleLine: All
+AllowShortIfStatementsOnASingleLine: AllIfsAndElse
+AllowShortLambdasOnASingleLine: All
+AllowShortLoopsOnASingleLine: true
+PointerAlignment: Left
+# ReferenceAlignment: Pointer
+...
