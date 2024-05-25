@@ -38,19 +38,6 @@ SOFTWARE.
 #endif
 #endif
 
-#include <libpmemobj++/make_persistent_array_atomic.hpp>
-#include <libpmemobj++/p.hpp>
-#include <libpmemobj++/persistent_ptr.hpp>
-#include <libpmemobj++/pool.hpp>
-
-namespace {
-// Toggle Memory Ordering Here
-// constexpr auto LoadMemoryOrder = std::memory_order_acquire;
-// constexpr auto StoreMemoryOrder = std::memory_order_release;
-constexpr auto LoadMemoryOrder = std::memory_order_seq_cst;
-constexpr auto StoreMemoryOrder = std::memory_order_seq_cst;
-} // namespace
-
 namespace rigtorp {
 namespace mpmc {
 #if defined(__cpp_lib_hardware_interference_size) && !defined(__APPLE__)
@@ -125,43 +112,9 @@ struct Slot {
   typename std::aligned_storage<sizeof(T), alignof(T)>::type storage;
 };
 
-template <typename T>
-struct MySlot {
-  ~MySlot() noexcept {
-    if (turn & 1) {
-      destroy();
-    }
-  }
-
-  template <typename... Args>
-  void construct(Args&&... args) noexcept {
-    static_assert(std::is_nothrow_constructible<T, Args&&...>::value,
-                  "T must be nothrow constructible with Args&&...");
-    new (&storage) T(std::forward<Args>(args)...);
-  }
-
-  void destroy() noexcept {
-    static_assert(std::is_nothrow_destructible<T>::value,
-                  "T must be nothrow destructible");
-    reinterpret_cast<T*>(&storage)->~T();
-  }
-
-  T&& move() noexcept { return reinterpret_cast<T&&>(storage); }
-
-  alignas(hardwareInterferenceSize) std::atomic<size_t> turn = {0};
-  typename std::aligned_storage<sizeof(T), alignof(T)>::type storage;
-};
-
 template <typename T, typename Allocator = AlignedAllocator<Slot<T>>>
 class Queue {
 private:
-  using PSlot = pmem::obj::p<MySlot<T>>; // only persist slot
-  using PSlotArray = PSlot[];
-  using SlotArrayPPtr = pmem::obj::persistent_ptr<PSlotArray>;
-  struct Root {
-    SlotArrayPPtr pSlots_;
-  };
-  using RootPool = pmem::obj::pool<Root>;
   static_assert(std::is_nothrow_copy_assignable<T>::value ||
                     std::is_nothrow_move_assignable<T>::value,
                 "T must be nothrow copy or move assignable");
@@ -169,7 +122,10 @@ private:
   static_assert(std::is_nothrow_destructible<T>::value,
                 "T must be nothrow destructible");
 
-  void QueueInit() {
+public:
+  explicit Queue(const size_t capacity,
+                 const Allocator& allocator = Allocator())
+      : capacity_(capacity), allocator_(allocator), head_(0), tail_(0) {
     if (capacity_ < 1) {
       throw std::invalid_argument("capacity < 1");
     }
@@ -199,74 +155,12 @@ private:
             static_cast<std::ptrdiff_t>(hardwareInterferenceSize),
         "head and tail must be a cache line apart to prevent false sharing");
   }
-  void QueueDestroy() {
+
+  ~Queue() noexcept {
     for (size_t i = 0; i < capacity_; ++i) {
       slots_[i].~Slot();
     }
     allocator_.deallocate(slots_, capacity_ + 1);
-  }
-
-  void QueueInitPersistent() {
-    if (capacity_ < 1) {
-      throw std::invalid_argument("capacity < 1");
-    }
-    const char* filepath = "poolfile";
-    const char* layout = "layout";
-    if (RootPool::check(filepath, layout) == 1) {
-      pop_ = RootPool::open(filepath, layout);
-    } else {
-      pop_ = RootPool::create(filepath, layout, PMEMOBJ_MIN_POOL);
-    }
-
-    // Allocate one extra slot to prevent false sharing on the last slot
-    if (pop_.root()->pSlots_ == nullptr) {
-      make_persistent_atomic<PSlotArray>(pop_, pSlots_, capacity_ + 1);
-      pop_.root()->pSlots_ = pSlots_;
-      // TODO: Make sure each pSlot is aligned. Honor the guarantees of the non-persistent constructor
-      /*     if (reinterpret_cast<size_t>(slots_) % alignof(Slot<T>) != 0) {
-            allocator_.deallocate(slots_, capacity_ + 1);
-            throw std::bad_alloc();
-          }
-          for (size_t i = 0; i < capacity_; ++i) {
-            new (&slots_[i]) Slot<T>();
-          } */
-    }
-
-    // TODO: Call Recover() around here
-
-    // TODO: Make sure each pSlot is aligned. Honor the guarantees of the non-persistent constructor
-    static_assert(
-        alignof(PSlot) == hardwareInterferenceSize,
-        "Slot must be aligned to cache line boundary to prevent false sharing");
-    static_assert(sizeof(PSlot) % hardwareInterferenceSize == 0,
-                  "Slot size must be a multiple of cache line size to prevent "
-                  "false sharing between adjacent slots");
-    static_assert(sizeof(Queue) % hardwareInterferenceSize == 0,
-                  "Queue size must be a multiple of cache line size to "
-                  "prevent false sharing between adjacent queues");
-    static_assert(
-        offsetof(Queue, tail_) - offsetof(Queue, head_) ==
-            static_cast<std::ptrdiff_t>(hardwareInterferenceSize),
-        "head and tail must be a cache line apart to prevent false sharing");
-  }
-
-  void QueueDestroyPersistent() {
-    delete_persistent_atomic<PSlotArray>(pSlots_, capacity_ + 1);
-    pSlots_ = nullptr;
-    pop_.root()->pSlots_ = nullptr;
-  }
-
-public:
-  explicit Queue(const size_t capacity, bool isPersistent_,
-                 const Allocator& allocator = Allocator())
-      : capacity_(capacity), allocator_(allocator), head_(0), tail_(0), isPersistent_(isPersistent_) {
-    if (isPersistent_) QueueInitPersistent();
-    else QueueInit();
-  }
-
-  ~Queue() noexcept {
-    if (isPersistent_) QueueDestroyPersistent();
-    else QueueDestroy();
   }
 
   // non-copyable and non-movable
@@ -283,19 +177,6 @@ public:
       ;
     slot.construct(std::forward<Args>(args)...);
     slot.turn.store(turn(head) * 2 + 1, std::memory_order_release);
-  }
-
-  template <typename... Args>
-  void emplace_p(Args&&... args) noexcept {
-    static_assert(std::is_nothrow_constructible<T, Args&&...>::value,
-                  "T must be nothrow constructible with Args&&...");
-    auto const head = head_.fetch_add(1);
-    auto& slot = slots_[idx(head)];
-    while (turn(head) * 2 != slot.get_ro().turn.get_ro().load(LoadMemoryOrder))
-      ;
-    slot.get_ro().construct(std::forward<Args>(args)...);
-    slot.get_ro().turn.get_ro().store(turn(head) * 2 + 1, StoreMemoryOrder);
-    pop_.persist(slot);
   }
 
   template <typename... Args>
@@ -326,23 +207,12 @@ public:
                   "T must be nothrow copy constructible");
     emplace(v);
   }
-  void push_p(const T& v) noexcept {
-    static_assert(std::is_nothrow_copy_constructible<T>::value,
-                  "T must be nothrow copy constructible");
-    emplace_p(v);
-  }
 
   template <typename P,
             typename = typename std::enable_if<
                 std::is_nothrow_constructible<T, P&&>::value>::type>
   void push(P&& v) noexcept {
     emplace(std::forward<P>(v));
-  }
-  template <typename P,
-            typename = typename std::enable_if<
-                std::is_nothrow_constructible<T, P&&>::value>::type>
-  void push_p(P&& v) noexcept {
-    emplace_p(std::forward<P>(v));
   }
 
   bool try_push(const T& v) noexcept {
@@ -366,17 +236,6 @@ public:
     v = slot.move();
     slot.destroy();
     slot.turn.store(turn(tail) * 2 + 2, std::memory_order_release);
-  }
-
-  void pop_p(T& v) noexcept {
-    auto const tail = tail_.fetch_add(1);
-    auto& slot = slots_[idx(tail)];
-    while (turn(tail) * 2 + 1 != slot.get_ro().turn.get_ro().load(LoadMemoryOrder))
-      ;
-    v = slot.get_ro().move();
-    slot.get_ro().destroy();
-    slot.get_ro().turn.get_ro().store(turn(tail) * 2 + 2, StoreMemoryOrder);
-    pop_.persist(slot);
   }
 
   bool try_pop(T& v) noexcept {
@@ -432,10 +291,6 @@ private:
   // Align to avoid false sharing between head_ and tail_
   alignas(hardwareInterferenceSize) std::atomic<size_t> head_;
   alignas(hardwareInterferenceSize) std::atomic<size_t> tail_;
-
-  bool isPersistent_;
-  RootPool pop_;
-  SlotArrayPPtr pSlots_;
 };
 } // namespace mpmc
 

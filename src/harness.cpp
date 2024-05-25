@@ -44,7 +44,7 @@ static volatile int target;
 
 using namespace rigtorp;
 
-MPMCQueue<void*> q(SZ);
+MPMCQueue<void*> q(SZ, false);
 
 static size_t elapsed_time(size_t us) {
   struct timeval t;
@@ -125,8 +125,6 @@ void* benchmark(int id, int nprocs) {
 
   int i;
   for (i = 0; i < nops / nprocs; ++i) {
-    bool ok;
-    // q.push(val);
     q.push(&val);
     delay_exec(&state);
 
