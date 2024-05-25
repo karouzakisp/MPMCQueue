@@ -44,7 +44,7 @@ static volatile int target;
 
 using namespace rigtorp;
 
-MPMCQueue<void *> q(SZ);
+MPMCQueue<void*> q(SZ);
 
 static size_t elapsed_time(size_t us) {
   struct timeval t;
@@ -52,7 +52,7 @@ static size_t elapsed_time(size_t us) {
   return t.tv_sec * 1000000 + t.tv_usec - us;
 }
 
-static double compute_mean(const double *times) {
+static double compute_mean(const double* times) {
   int i;
   double sum = 0;
 
@@ -63,7 +63,7 @@ static double compute_mean(const double *times) {
   return sum / NUM_ITERS;
 }
 
-static double compute_cov(const double *times, double mean) {
+static double compute_cov(const double* times, double mean) {
   double variance = 0;
 
   int i;
@@ -118,8 +118,8 @@ static void report(int id, int nprocs, int i, long us) {
 }
 
 #include <iostream>
-void *benchmark(int id, int nprocs) {
-  void *val = (void *)(intptr_t)(id + 1);
+void* benchmark(int id, int nprocs) {
+  void* val = (void*)(intptr_t)(id + 1);
   delay_t state;
   delay_init(&state, id);
 
@@ -127,20 +127,11 @@ void *benchmark(int id, int nprocs) {
   for (i = 0; i < nops / nprocs; ++i) {
     bool ok;
     // q.push(val);
-    ok = q.try_push(val);
-    if (!ok) {
-      std::cout << "id:" << id + 1 << " fail try_push("
-                << reinterpret_cast<intptr_t>(val) << ") \n";
-    }
+    q.push(&val);
     delay_exec(&state);
 
-    // q.pop(ret);
-    void *ret{nullptr};
-    ok = q.try_pop(ret);
-    if (!ok) {
-      std::cout << "id:" << id + 1 << " fail try_pop() -> "
-                << reinterpret_cast<intptr_t>(ret) << "\n";
-    }
+    void* ret{nullptr};
+    q.pop(ret);
     delay_exec(&state);
   }
 
@@ -168,16 +159,16 @@ void thread_init(int id, int nprocs) { ; }
 void thread_exit(int id, int nprocs) { ; }
 
 #ifdef VERIFY
-static int compare(const void *a, const void *b) {
-  return *(long *)a - *(long *)b;
+static int compare(const void* a, const void* b) {
+  return *(long*)a - *(long*)b;
 }
 #endif
 
-int verify(int nprocs, void **results) {
+int verify(int nprocs, void** results) {
 #ifndef VERIFY
   return 0;
 #else
-  qsort(results, nprocs, sizeof(void *), compare);
+  qsort(results, nprocs, sizeof(void*), compare);
 
   int i;
   int ret = 0;
@@ -209,7 +200,7 @@ int verify(int nprocs, void **results) {
 #endif
 }
 
-static void *thread(void *bits) {
+static void* thread(void* bits) {
   int id = bits_hi(bits);
   int nprocs = bits_lo(bits);
 
@@ -224,7 +215,7 @@ static void *thread(void *bits) {
   pthread_barrier_wait(&barrier);
 
   int i;
-  void *result = NULL;
+  void* result = NULL;
 
   for (i = 0; i < MAX_ITERS && target == 0; ++i) {
     long us = elapsed_time(0);
@@ -238,7 +229,7 @@ static void *thread(void *bits) {
   return result;
 }
 
-int main(int argc, const char *argv[]) {
+int main(int argc, const char* argv[]) {
   int nprocs = 0;
   int n = 0;
 
@@ -277,7 +268,7 @@ int main(int argc, const char *argv[]) {
   init(nprocs, n);
 
   pthread_t ths[nprocs];
-  void *res[nprocs];
+  void* res[nprocs];
 
   int i;
   for (i = 1; i < nprocs; i++) {

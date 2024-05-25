@@ -122,9 +122,12 @@ struct Slot {
 
   T&& move() noexcept { return reinterpret_cast<T&&>(storage); }
 
+  using atomic_size_t = p<std::atomic<size_t>>;
+  alignas(hardwareInterferenceSize) atomic_size_t turn = {0};
+
   // Align to avoid false sharing between adjacent slots
-  alignas(hardwareInterferenceSize) p<std::atomic<size_t>> turn = {0};
-  typename std::aligned_storage<sizeof(T), alignof(T)>::type storage;
+  using alignedType = typename std::aligned_storage<sizeof(T), alignof(T)>::type;
+  p<alignedType> storage;
 };
 
 template <typename T, typename Allocator = AlignedAllocator<Slot<T>>>
@@ -136,11 +139,13 @@ private:
   using pool_type = pool<root>;
 
   // pool object
-  pool_type pop;
+  pool_type pop_;
 
   // slots are the only thing that is persisted.
   using pslot = p<Slot<T>>;
-  persistent_ptr<pslot[]> slots_;
+  using pslotArray = pslot[];
+
+  persistent_ptr<pslotArray> slots_;
 
   static_assert(std::is_nothrow_copy_assignable<T>::value ||
                     std::is_nothrow_move_assignable<T>::value,
@@ -159,21 +164,24 @@ public:
     const char* filepath = "poolfile";
     const char* layout = "layout";
     if (pool_type::check(filepath, layout) == 1) {
-      pop = pool_type::open(filepath, layout);
+      pop_ = pool_type::open(filepath, layout);
       // TODO: call recover
       // Recover() Probably We need to add an interface to be able toc all Recover(slots)
     } else {
-      pop = pool_type::create(filepath, layout, PMEMOBJ_MIN_POOL);
+      pop_ = pool_type::create(filepath, layout, PMEMOBJ_MIN_POOL);
     }
     // Allocate one extra slot to prevent false sharing on the last slot
-    make_persistent_atomic<p<Slot<T>>[]>(pop, slots_, capacity);
+    make_persistent_atomic<pslotArray>(pop_, slots_, capacity);
+
+    // TODO: make these is not required when we use make_persistent_atomic.
     // Allocators are not required to honor alignment for over-aligned types
     // (see http://eel.is/c++draft/allocator.requirements#10) so we verify
     // alignment here
+    /*
     if (reinterpret_cast<size_t>(slots_) % alignof(Slot<T>) != 0) {
       allocator_.deallocate(slots_, capacity_ + 1);
       throw std::bad_alloc();
-    }
+    }*/
     for (size_t i = 0; i < capacity_; ++i) {
       new (&slots_[i]) Slot<T>();
     }
@@ -193,11 +201,13 @@ public:
   }
 
   ~Queue() noexcept {
-    for (size_t i = 0; i < capacity_; ++i) {
+  }
+  /* TODO: Destructor should not de allocate pesistent memory.
+   * for (size_t i = 0; i < capacity_; ++i) {
       slots_[i].~Slot();
     }
     allocator_.deallocate(slots_, capacity_ + 1);
-  }
+  }*/
 
   // non-copyable and non-movable
   Queue(const Queue&) = delete;
@@ -209,12 +219,14 @@ public:
                   "T must be nothrow constructible with Args&&...");
     auto const head = head_.fetch_add(1);
     auto& slot = slots_[idx(head)];
-    while (turn(head) * 2 != slot.get_ro().turn.load(LoadMemoryOrder));
-    slot.construct(std::forward<Args>(args)...);
-    slot.turn.store(turn(head) * 2 + 1, StoreMemoryOrder);
-    pop.persist(slot);
+    while (turn(head) * 2 != slot.get_ro().turn.get_ro().load(LoadMemoryOrder));
+    slot.get_ro().construct(std::forward<Args>(args)...);
+    slot.get_ro().turn.get_ro().store(turn(head) * 2 + 1, StoreMemoryOrder);
+    pop_.persist(slot);
   }
 
+  /* TODO: Try emplace is not yet supported.
+   *
   template <typename... Args>
   bool try_emplace(Args&&... args) noexcept {
     static_assert(std::is_nothrow_constructible<T, Args&&...>::value,
@@ -236,7 +248,7 @@ public:
         }
       }
     }
-  }
+  } */
 
   void push(const T& v) noexcept {
     static_assert(std::is_nothrow_copy_constructible<T>::value,
@@ -267,22 +279,24 @@ public:
   void pop(T& v) noexcept {
     auto const tail = tail_.fetch_add(1);
     auto& slot = slots_[idx(tail)];
-    while (turn(tail) * 2 + 1 != slot.turn.load(LoadMemoryOrder));
-    v = slot.move();
-    slot.destroy();
-    slot.turn.store(turn(tail) * 2 + 2, StoreMemoryOrder);
-    root_.persist(slot);
+    while (turn(tail) * 2 + 1 != slot.get_ro().turn.get_ro().load(LoadMemoryOrder));
+    v = slot.get_ro().move();
+    slot.get_ro().destroy();
+    slot.get_ro().turn.get_ro().store(turn(tail) * 2 + 2, StoreMemoryOrder);
+    pop_.persist(slot);
   }
 
+  /* TODO: try_pop is not yet supported for persistent version.
+   *
   bool try_pop(T& v) noexcept {
     auto tail = tail_.load(LoadMemoryOrder);
     for (;;) {
       auto& slot = slots_[idx(tail)];
-      if (turn(tail) * 2 + 1 == slot.turn.load(LoadMemoryOrder)) {
+      if (turn(tail) * 2 + 1 == slot.get_ro().turn.get_ro().load(LoadMemoryOrder)) {
         if (tail_.compare_exchange_strong(tail, tail + 1)) {
-          v = slot.move();
+          v = slot.get_ro().move();
           slot.destroy();
-          slot.turn.store(turn(tail) * 2 + 2, StoreMemoryOrder);
+          slot.get_ro().turn.get_ro().store(turn(tail) * 2 + 2, StoreMemoryOrder);
           return true;
         }
       } else {
@@ -294,6 +308,7 @@ public:
       }
     }
   }
+*/
 
   /// Returns the number of elements in the queue.
   /// The size can be negative when the queue is empty and there is at least one
