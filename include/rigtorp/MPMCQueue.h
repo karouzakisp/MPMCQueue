@@ -156,6 +156,9 @@ struct MySlot {
 
   T&& move() noexcept { return reinterpret_cast<T&&>(storage); }
 
+  using atomic_size_t = p<std::atomic<size_t>>;
+  alignas(hardwareInterferenceSize) atomic_size_t turn = {0};
+
   // Align to avoid false sharing between adjacent slots
   alignas(hardwareInterferenceSize) std::atomic<size_t> turn = {0};
   typename std::aligned_storage<sizeof(T), alignof(T)>::type storage;
@@ -266,10 +269,11 @@ private:
     // Allocators are not required to honor alignment for over-aligned types
     // (see http://eel.is/c++draft/allocator.requirements#10) so we verify
     // alignment here
+    /*
     if (reinterpret_cast<size_t>(slots_) % alignof(Slot<T>) != 0) {
       allocator_.deallocate(slots_, capacity_ + 1);
       throw std::bad_alloc();
-    }
+    }*/
     for (size_t i = 0; i < capacity_; ++i) {
       new (&slots_[i]) Slot<T>();
     }
@@ -418,6 +422,8 @@ public:
     slot.turn.store(turn(head) * 2 + 1, std::memory_order_release);
   }
 
+  /* TODO: Try emplace is not yet supported.
+   *
   template <typename... Args>
   bool try_emplace(Args&&... args) noexcept {
     static_assert(std::is_nothrow_constructible<T, Args&&...>::value,
@@ -439,7 +445,7 @@ public:
         }
       }
     }
-  }
+  } */
 
   void push(const T& v) noexcept {
     static_assert(std::is_nothrow_copy_constructible<T>::value,
@@ -487,13 +493,15 @@ public:
     slot.turn.store(turn(tail) * 2 + 2, std::memory_order_release);
   }
 
+  /* TODO: try_pop is not yet supported for persistent version.
+   *
   bool try_pop(T& v) noexcept {
     auto tail = tail_.load(LoadMemoryOrder);
     for (;;) {
       auto& slot = slots_[idx(tail)];
-      if (turn(tail) * 2 + 1 == slot.turn.load(LoadMemoryOrder)) {
+      if (turn(tail) * 2 + 1 == slot.get_ro().turn.get_ro().load(LoadMemoryOrder)) {
         if (tail_.compare_exchange_strong(tail, tail + 1)) {
-          v = slot.move();
+          v = slot.get_ro().move();
           slot.destroy();
           slot.turn.store(turn(tail) * 2 + 2, std::memory_order_release);
           return true;
@@ -507,6 +515,7 @@ public:
       }
     }
   }
+*/
 
   /// Returns the number of elements in the queue.
   /// The size can be negative when the queue is empty and there is at least one
