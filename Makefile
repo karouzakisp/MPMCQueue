@@ -4,7 +4,7 @@ BUILD_DIR := build
 
 # CFLAGS := -g -Wall -pthread -I$(INCLUDE_DIR) -O0 #-O3
 CC := g++
-LDLIBS := -lpthread -lm
+LDLIBS := -lpthread -lm -lpmemobj
 CXXFLAGS := -I$(INCLUDE_DIR) -Wall -Wextra -Wshadow -Wnon-virtual-dtor -Wpedantic \
 -Wold-style-cast -Wcast-align -Woverloaded-virtual -Wconversion -Wsign-conversion \
 -Wmisleading-indentation -Wduplicated-cond -Wduplicated-branches -Wlogical-op \
