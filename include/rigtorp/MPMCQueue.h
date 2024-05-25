@@ -25,6 +25,11 @@ SOFTWARE.
 #include <atomic>
 #include <cassert>
 #include <cstddef> // offsetof
+#include <libpmemobj++/make_persistent_array_atomic.hpp>
+#include <libpmemobj++/p.hpp>
+#include <libpmemobj++/persistent_ptr.hpp>
+#include <libpmemobj++/pool.hpp>
+#include <libpmemobj/pool_base.h>
 #include <limits>
 #include <memory>
 #include <new> // std::hardware_destructive_interference_size
@@ -38,13 +43,15 @@ SOFTWARE.
 #endif
 #endif
 
+using namespace pmem::obj;
+
 namespace {
-    // Toggle Memory Ordering Here
-    // constexpr auto LoadMemoryOrder = std::memory_order_acquire;
-    // constexpr auto StoreMemoryOrder = std::memory_order_release;
-    constexpr auto LoadMemoryOrder = std::memory_order_seq_cst;
-    constexpr auto StoreMemoryOrder = std::memory_order_seq_cst;
-}
+// Toggle Memory Ordering Here
+// constexpr auto LoadMemoryOrder = std::memory_order_acquire;
+// constexpr auto StoreMemoryOrder = std::memory_order_release;
+constexpr auto LoadMemoryOrder = std::memory_order_seq_cst;
+constexpr auto StoreMemoryOrder = std::memory_order_seq_cst;
+} // namespace
 
 namespace rigtorp {
 namespace mpmc {
@@ -56,23 +63,25 @@ static constexpr size_t hardwareInterferenceSize = 64;
 #endif
 
 #if defined(__cpp_aligned_new)
-template <typename T> using AlignedAllocator = std::allocator<T>;
+template <typename T>
+using AlignedAllocator = std::allocator<T>;
 #else
-template <typename T> struct AlignedAllocator {
+template <typename T>
+struct AlignedAllocator {
   using value_type = T;
 
-  T *allocate(std::size_t n) {
+  T* allocate(std::size_t n) {
     if (n > std::numeric_limits<std::size_t>::max() / sizeof(T)) {
       throw std::bad_array_new_length();
     }
 #ifdef _WIN32
-    auto *p = static_cast<T *>(_aligned_malloc(sizeof(T) * n, alignof(T)));
+    auto* p = static_cast<T*>(_aligned_malloc(sizeof(T) * n, alignof(T)));
     if (p == nullptr) {
       throw std::bad_alloc();
     }
 #else
-    T *p;
-    if (posix_memalign(reinterpret_cast<void **>(&p), alignof(T),
+    T* p;
+    if (posix_memalign(reinterpret_cast<void**>(&p), alignof(T),
                        sizeof(T) * n) != 0) {
       throw std::bad_alloc();
     }
@@ -80,7 +89,7 @@ template <typename T> struct AlignedAllocator {
     return p;
   }
 
-  void deallocate(T *p, std::size_t) {
+  void deallocate(T* p, std::size_t) {
 #ifdef _WIN32
     _aligned_free(p);
 #else
@@ -90,15 +99,17 @@ template <typename T> struct AlignedAllocator {
 };
 #endif
 
-template <typename T> struct Slot {
+template <typename T>
+struct Slot {
   ~Slot() noexcept {
-    if (turn & 1) {
+    if (turn.get_ro() & 1) {
       destroy();
     }
   }
 
-  template <typename... Args> void construct(Args &&...args) noexcept {
-    static_assert(std::is_nothrow_constructible<T, Args &&...>::value,
+  template <typename... Args>
+  void construct(Args&&... args) noexcept {
+    static_assert(std::is_nothrow_constructible<T, Args&&...>::value,
                   "T must be nothrow constructible with Args&&...");
     new (&storage) T(std::forward<Args>(args)...);
   }
@@ -106,19 +117,31 @@ template <typename T> struct Slot {
   void destroy() noexcept {
     static_assert(std::is_nothrow_destructible<T>::value,
                   "T must be nothrow destructible");
-    reinterpret_cast<T *>(&storage)->~T();
+    reinterpret_cast<T*>(&storage)->~T();
   }
 
-  T &&move() noexcept { return reinterpret_cast<T &&>(storage); }
+  T&& move() noexcept { return reinterpret_cast<T&&>(storage); }
 
   // Align to avoid false sharing between adjacent slots
-  alignas(hardwareInterferenceSize) std::atomic<size_t> turn = {0};
+  alignas(hardwareInterferenceSize) p<std::atomic<size_t>> turn = {0};
   typename std::aligned_storage<sizeof(T), alignof(T)>::type storage;
 };
 
 template <typename T, typename Allocator = AlignedAllocator<Slot<T>>>
 class Queue {
 private:
+  struct root {
+    persistent_ptr<p<Slot<T>>[]> slots_;
+  };
+  using pool_type = pool<root>;
+
+  // pool object
+  pool_type pop;
+
+  // slots are the only thing that is persisted.
+  using pslot = p<Slot<T>>;
+  persistent_ptr<pslot[]> slots_;
+
   static_assert(std::is_nothrow_copy_assignable<T>::value ||
                     std::is_nothrow_move_assignable<T>::value,
                 "T must be nothrow copy or move assignable");
@@ -128,13 +151,22 @@ private:
 
 public:
   explicit Queue(const size_t capacity,
-                 const Allocator &allocator = Allocator())
+                 const Allocator& allocator = Allocator())
       : capacity_(capacity), allocator_(allocator), head_(0), tail_(0) {
     if (capacity_ < 1) {
       throw std::invalid_argument("capacity < 1");
     }
+    const char* filepath = "poolfile";
+    const char* layout = "layout";
+    if (pool_type::check(filepath, layout) == 1) {
+      pop = pool_type::open(filepath, layout);
+      // TODO: call recover
+      // Recover() Probably We need to add an interface to be able toc all Recover(slots)
+    } else {
+      pop = pool_type::create(filepath, layout, PMEMOBJ_MIN_POOL);
+    }
     // Allocate one extra slot to prevent false sharing on the last slot
-    slots_ = allocator_.allocate(capacity_ + 1);
+    make_persistent_atomic<p<Slot<T>>[]>(pop, slots_, capacity);
     // Allocators are not required to honor alignment for over-aligned types
     // (see http://eel.is/c++draft/allocator.requirements#10) so we verify
     // alignment here
@@ -168,27 +200,29 @@ public:
   }
 
   // non-copyable and non-movable
-  Queue(const Queue &) = delete;
-  Queue &operator=(const Queue &) = delete;
+  Queue(const Queue&) = delete;
+  Queue& operator=(const Queue&) = delete;
 
-  template <typename... Args> void emplace(Args &&...args) noexcept {
-    static_assert(std::is_nothrow_constructible<T, Args &&...>::value,
+  template <typename... Args>
+  void emplace(Args&&... args) noexcept {
+    static_assert(std::is_nothrow_constructible<T, Args&&...>::value,
                   "T must be nothrow constructible with Args&&...");
     auto const head = head_.fetch_add(1);
-    auto &slot = slots_[idx(head)];
-    while (turn(head) * 2 != slot.turn.load(LoadMemoryOrder))
-      ;
+    auto& slot = slots_[idx(head)];
+    while (turn(head) * 2 != slot.get_ro().turn.load(LoadMemoryOrder));
     slot.construct(std::forward<Args>(args)...);
     slot.turn.store(turn(head) * 2 + 1, StoreMemoryOrder);
+    pop.persist(slot);
   }
 
-  template <typename... Args> bool try_emplace(Args &&...args) noexcept {
-    static_assert(std::is_nothrow_constructible<T, Args &&...>::value,
+  template <typename... Args>
+  bool try_emplace(Args&&... args) noexcept {
+    static_assert(std::is_nothrow_constructible<T, Args&&...>::value,
                   "T must be nothrow constructible with Args&&...");
     auto head = head_.load(LoadMemoryOrder);
     for (;;) {
-      auto &slot = slots_[idx(head)];
-      if (turn(head) * 2 == slot.turn.load(LoadMemoryOrder)) {
+      auto& slot = slots_[idx(head)];
+      if (turn(head) * 2 == slot.get_ro().turn.load(LoadMemoryOrder)) {
         if (head_.compare_exchange_strong(head, head + 1)) {
           slot.construct(std::forward<Args>(args)...);
           slot.turn.store(turn(head) * 2 + 1, StoreMemoryOrder);
@@ -204,7 +238,7 @@ public:
     }
   }
 
-  void push(const T &v) noexcept {
+  void push(const T& v) noexcept {
     static_assert(std::is_nothrow_copy_constructible<T>::value,
                   "T must be nothrow copy constructible");
     emplace(v);
@@ -212,12 +246,12 @@ public:
 
   template <typename P,
             typename = typename std::enable_if<
-                std::is_nothrow_constructible<T, P &&>::value>::type>
-  void push(P &&v) noexcept {
+                std::is_nothrow_constructible<T, P&&>::value>::type>
+  void push(P&& v) noexcept {
     emplace(std::forward<P>(v));
   }
 
-  bool try_push(const T &v) noexcept {
+  bool try_push(const T& v) noexcept {
     static_assert(std::is_nothrow_copy_constructible<T>::value,
                   "T must be nothrow copy constructible");
     return try_emplace(v);
@@ -225,25 +259,25 @@ public:
 
   template <typename P,
             typename = typename std::enable_if<
-                std::is_nothrow_constructible<T, P &&>::value>::type>
-  bool try_push(P &&v) noexcept {
+                std::is_nothrow_constructible<T, P&&>::value>::type>
+  bool try_push(P&& v) noexcept {
     return try_emplace(std::forward<P>(v));
   }
 
-  void pop(T &v) noexcept {
+  void pop(T& v) noexcept {
     auto const tail = tail_.fetch_add(1);
-    auto &slot = slots_[idx(tail)];
-    while (turn(tail) * 2 + 1 != slot.turn.load(LoadMemoryOrder))
-      ;
+    auto& slot = slots_[idx(tail)];
+    while (turn(tail) * 2 + 1 != slot.turn.load(LoadMemoryOrder));
     v = slot.move();
     slot.destroy();
     slot.turn.store(turn(tail) * 2 + 2, StoreMemoryOrder);
+    root_.persist(slot);
   }
 
-  bool try_pop(T &v) noexcept {
+  bool try_pop(T& v) noexcept {
     auto tail = tail_.load(LoadMemoryOrder);
     for (;;) {
-      auto &slot = slots_[idx(tail)];
+      auto& slot = slots_[idx(tail)];
       if (turn(tail) * 2 + 1 == slot.turn.load(LoadMemoryOrder)) {
         if (tail_.compare_exchange_strong(tail, tail + 1)) {
           v = slot.move();
@@ -268,7 +302,7 @@ public:
   ptrdiff_t size() const noexcept {
     // TODO: How can we deal with wrapped queue on 32bit?
     // return static_cast<ptrdiff_t>(head_.load(std::memory_order_relaxed) -
-                                //   tail_.load(std::memory_order_relaxed));
+    //   tail_.load(std::memory_order_relaxed));
     return static_cast<ptrdiff_t>(head_.load(LoadMemoryOrder) -
                                   tail_.load(StoreMemoryOrder));
   }
@@ -285,7 +319,6 @@ private:
 
 private:
   const size_t capacity_;
-  Slot<T> *slots_;
 #if defined(__has_cpp_attribute) && __has_cpp_attribute(no_unique_address)
   Allocator allocator_ [[no_unique_address]];
 #else
