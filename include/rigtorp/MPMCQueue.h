@@ -156,9 +156,6 @@ struct MySlot {
 
   T&& move() noexcept { return reinterpret_cast<T&&>(storage); }
 
-  using atomic_size_t = p<std::atomic<size_t>>;
-  alignas(hardwareInterferenceSize) atomic_size_t turn = {0};
-
   // Align to avoid false sharing between adjacent slots
   alignas(hardwareInterferenceSize) std::atomic<size_t> turn = {0};
   typename std::aligned_storage<sizeof(T), alignof(T)>::type storage;
@@ -269,11 +266,10 @@ private:
     // Allocators are not required to honor alignment for over-aligned types
     // (see http://eel.is/c++draft/allocator.requirements#10) so we verify
     // alignment here
-    /*
     if (reinterpret_cast<size_t>(slots_) % alignof(Slot<T>) != 0) {
       allocator_.deallocate(slots_, capacity_ + 1);
       throw std::bad_alloc();
-    }*/
+    }
     for (size_t i = 0; i < capacity_; ++i) {
       new (&slots_[i]) Slot<T>();
     }
@@ -422,8 +418,6 @@ public:
     slot.turn.store(turn(head) * 2 + 1, std::memory_order_release);
   }
 
-  /* TODO: Try emplace is not yet supported.
-   *
   template <typename... Args>
   bool try_emplace(Args&&... args) noexcept {
     static_assert(std::is_nothrow_constructible<T, Args&&...>::value,
@@ -445,7 +439,7 @@ public:
         }
       }
     }
-  } */
+  }
 
   void push(const T& v) noexcept {
     static_assert(std::is_nothrow_copy_constructible<T>::value,
@@ -457,6 +451,12 @@ public:
                 std::is_nothrow_constructible<T, P&&>::value>::type>
   void push(P&& v) noexcept {
     emplace(std::forward<P>(v));
+  }
+  template <typename P,
+            typename = typename std::enable_if<
+                std::is_nothrow_constructible<T, P&&>::value>::type>
+  void push_p(P&& v) noexcept {
+    emplace_p(std::forward<P>(v));
   }
 
   bool try_push(const T& v) noexcept {
@@ -493,15 +493,13 @@ public:
     slot.turn.store(turn(tail) * 2 + 2, std::memory_order_release);
   }
 
-  /* TODO: try_pop is not yet supported for persistent version.
-   *
   bool try_pop(T& v) noexcept {
-    auto tail = tail_.load(LoadMemoryOrder);
+    auto tail = tail_.load(std::memory_order_acquire);
     for (;;) {
       auto& slot = slots_[idx(tail)];
-      if (turn(tail) * 2 + 1 == slot.get_ro().turn.get_ro().load(LoadMemoryOrder)) {
+      if (turn(tail) * 2 + 1 == slot.turn.load(std::memory_order_acquire)) {
         if (tail_.compare_exchange_strong(tail, tail + 1)) {
-          v = slot.get_ro().move();
+          v = slot.move();
           slot.destroy();
           slot.turn.store(turn(tail) * 2 + 2, std::memory_order_release);
           return true;
@@ -515,7 +513,6 @@ public:
       }
     }
   }
-*/
 
   /// Returns the number of elements in the queue.
   /// The size can be negative when the queue is empty and there is at least one
@@ -523,10 +520,8 @@ public:
   /// effort guess until all reader and writer threads have been joined.
   ptrdiff_t size() const noexcept {
     // TODO: How can we deal with wrapped queue on 32bit?
-    // return static_cast<ptrdiff_t>(head_.load(std::memory_order_relaxed) -
-    //   tail_.load(std::memory_order_relaxed));
-    return static_cast<ptrdiff_t>(head_.load(LoadMemoryOrder) -
-                                  tail_.load(StoreMemoryOrder));
+    return static_cast<ptrdiff_t>(head_.load(std::memory_order_relaxed) -
+                                  tail_.load(std::memory_order_relaxed));
   }
 
   /// Returns true if the queue is empty.

@@ -2,6 +2,7 @@ INCLUDE_DIR := include
 SRC_DIR := src
 BUILD_DIR := build
 
+# CFLAGS := -g -Wall -pthread -I$(INCLUDE_DIR) -O0 #-O3
 CC := g++
 # CFLAGS := -g -Wall -pthread -I$(INCLUDE_DIR) -O0 #-O3
 CXXFLAGS := -I$(INCLUDE_DIR) -Wall -Wextra -Wshadow -Wnon-virtual-dtor -Wpedantic \
