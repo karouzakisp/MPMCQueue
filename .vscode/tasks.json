@@ -7,17 +7,21 @@
             "label": "make mpmcqueue_bench",
             "type": "shell",
             "command": "make clean; make build/mpmcqueue_bench",
-            "problemMatcher": [],
+            "problemMatcher": [
+                "$gcc"
+            ],
             "group": {
                 "kind": "build",
                 "isDefault": false
             }
         },
         {
-            "label": "make recover",
+            "label": "make recover_test",
             "type": "shell",
-            "command": "make clean; make build/recover",
-            "problemMatcher": [],
+            "command": "make clean; make build/recover_test",
+            "problemMatcher": [
+                "$gcc"
+            ],
             "group": {
                 "kind": "build",
                 "isDefault": true

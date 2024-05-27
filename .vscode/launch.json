@@ -32,7 +32,7 @@
             "preLaunchTask": "make mpmcqueue_bench"
         },
         {
-            "name": "recover",
+            "name": "recover_test",
             "type": "cppdbg",
             "request": "launch",
             "program": "${workspaceFolder}/recover",
@@ -56,7 +56,7 @@
                     "ignoreFailures": true
                 }
             ],
-            "preLaunchTask": "make recover"
+            "preLaunchTask": "make recover_test"
         }
     ]
 }

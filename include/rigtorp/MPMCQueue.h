@@ -38,13 +38,24 @@ SOFTWARE.
 #endif
 #endif
 
+#include <span>
+#include <tuple>
+
+#include <libpmemobj++/make_persistent.hpp>
+#include <libpmemobj++/make_persistent_array_atomic.hpp>
+#include <libpmemobj++/p.hpp>
+#include <libpmemobj++/persistent_ptr.hpp>
+#include <libpmemobj++/persistent_ptr_base.hpp>
+#include <libpmemobj++/pool.hpp>
+#include <libpmemobj++/transaction.hpp>
+
 namespace {
-    // Toggle Memory Ordering Here
-    // constexpr auto LoadMemoryOrder = std::memory_order_acquire;
-    // constexpr auto StoreMemoryOrder = std::memory_order_release;
-    constexpr auto LoadMemoryOrder = std::memory_order_seq_cst;
-    constexpr auto StoreMemoryOrder = std::memory_order_seq_cst;
-}
+// Toggle Memory Ordering Here
+constexpr auto LoadMemoryOrder = std::memory_order_acquire;
+constexpr auto StoreMemoryOrder = std::memory_order_release;
+// constexpr auto LoadMemoryOrder = std::memory_order_seq_cst;
+// constexpr auto StoreMemoryOrder = std::memory_order_seq_cst;
+} // namespace
 
 namespace rigtorp {
 namespace mpmc {
@@ -56,23 +67,25 @@ static constexpr size_t hardwareInterferenceSize = 64;
 #endif
 
 #if defined(__cpp_aligned_new)
-template <typename T> using AlignedAllocator = std::allocator<T>;
+template <typename T>
+using AlignedAllocator = std::allocator<T>;
 #else
-template <typename T> struct AlignedAllocator {
+template <typename T>
+struct AlignedAllocator {
   using value_type = T;
 
-  T *allocate(std::size_t n) {
+  T* allocate(std::size_t n) {
     if (n > std::numeric_limits<std::size_t>::max() / sizeof(T)) {
       throw std::bad_array_new_length();
     }
 #ifdef _WIN32
-    auto *p = static_cast<T *>(_aligned_malloc(sizeof(T) * n, alignof(T)));
+    auto* p = static_cast<T*>(_aligned_malloc(sizeof(T) * n, alignof(T)));
     if (p == nullptr) {
       throw std::bad_alloc();
     }
 #else
-    T *p;
-    if (posix_memalign(reinterpret_cast<void **>(&p), alignof(T),
+    T* p;
+    if (posix_memalign(reinterpret_cast<void**>(&p), alignof(T),
                        sizeof(T) * n) != 0) {
       throw std::bad_alloc();
     }
@@ -80,7 +93,7 @@ template <typename T> struct AlignedAllocator {
     return p;
   }
 
-  void deallocate(T *p, std::size_t) {
+  void deallocate(T* p, std::size_t) {
 #ifdef _WIN32
     _aligned_free(p);
 #else
@@ -90,15 +103,17 @@ template <typename T> struct AlignedAllocator {
 };
 #endif
 
-template <typename T> struct Slot {
+template <typename T>
+struct Slot {
   ~Slot() noexcept {
     if (turn & 1) {
       destroy();
     }
   }
 
-  template <typename... Args> void construct(Args &&...args) noexcept {
-    static_assert(std::is_nothrow_constructible<T, Args &&...>::value,
+  template <typename... Args>
+  void construct(Args&&... args) noexcept {
+    static_assert(std::is_nothrow_constructible<T, Args&&...>::value,
                   "T must be nothrow constructible with Args&&...");
     new (&storage) T(std::forward<Args>(args)...);
   }
@@ -106,10 +121,10 @@ template <typename T> struct Slot {
   void destroy() noexcept {
     static_assert(std::is_nothrow_destructible<T>::value,
                   "T must be nothrow destructible");
-    reinterpret_cast<T *>(&storage)->~T();
+    reinterpret_cast<T*>(&storage)->~T();
   }
 
-  T &&move() noexcept { return reinterpret_cast<T &&>(storage); }
+  T&& move() noexcept { return reinterpret_cast<T&&>(storage); }
 
   // Align to avoid false sharing between adjacent slots
   alignas(hardwareInterferenceSize) std::atomic<size_t> turn = {0};
@@ -118,6 +133,16 @@ template <typename T> struct Slot {
 
 template <typename T, typename Allocator = AlignedAllocator<Slot<T>>>
 class Queue {
+
+public:
+  using SlotSpan = std::span<Slot<T>>;
+  auto RecoverTest(SlotSpan input) -> std::tuple<SlotSpan, size_t, size_t> {
+    // return RecoverImpl(input);
+
+    pmem::obj::persistent_ptr<Slot<T>[]> slotsPtr;
+    return RecoverImpl(SlotSpan{slotsPtr.get() + capacity_});
+  }
+
 private:
   static_assert(std::is_nothrow_copy_assignable<T>::value ||
                     std::is_nothrow_move_assignable<T>::value,
@@ -126,9 +151,44 @@ private:
   static_assert(std::is_nothrow_destructible<T>::value,
                 "T must be nothrow destructible");
 
+  auto RecoverValidatePre(const SlotSpan input) -> bool {
+    /*     bool preCondition;
+        const auto [min, max] = std::ranges::minmax_element(input, [](auto a, auto b) { return a.turn < b.turn; });
+        preCondition = (max->turn - min->turn) <= 2;
+        if (!preCondition) return false; */
+    //
+    return true;
+  }
+  auto RecoverValidatePost(const SlotSpan input) -> bool {
+    return true;
+  }
+  auto RecoverImpl(const SlotSpan input) -> std::tuple<SlotSpan, size_t, size_t> {
+    assert(input);
+    /*     assert(RecoverValidatePre(input));
+        // find max turn and its last index
+        const auto lastMaxR = std::ranges::max_element(slots.rbegin(), slots.rend(), [](auto a, auto b) { return a.turn < b.turn; });
+        assert(lastMaxR != slots.rend());
+        const auto lastMax = lastMaxR.base() - 1;
+        const auto maxTurn = lastMax->turn;
+        if ((maxTurn % 2) == 0) {
+          // dequeues present, mark incomplete dequeues as complete and sort the rest of the enqueues
+          std::ranges::for_each(slots.begin(), lastMax, [maxTurn](auto& a) { a.turn = maxTurn; });
+          std::ranges::stable_sort(lastMax + 1, slots.end(), [](auto a, auto b) { return a.turn > b.turn; });
+        } else {
+          // only enqueues present, sort whole array
+          std::ranges::stable_sort(slots.begin(), slots.end(), [](auto a, auto b) { return a.turn > b.turn; });
+        }
+        // recover tail and head
+        const auto firstZero = std::ranges::find_if(slots, [](auto a) { return a.turn == 0; });
+        size_t tail = std::accumulate(slots.begin(), firstZero, 0ULL, [](auto acc, auto slot) { return acc + slot.turn / 2; });
+        size_t head = std::accumulate(slots.begin(), firstZero, 0ULL, [](auto acc, auto slot) { return acc + (slot.turn + 1) / 2; });
+        return {slots, tail, head}; */
+    return {};
+  }
+
 public:
   explicit Queue(const size_t capacity,
-                 const Allocator &allocator = Allocator())
+                 const Allocator& allocator = Allocator())
       : capacity_(capacity), allocator_(allocator), head_(0), tail_(0) {
     if (capacity_ < 1) {
       throw std::invalid_argument("capacity < 1");
@@ -168,26 +228,28 @@ public:
   }
 
   // non-copyable and non-movable
-  Queue(const Queue &) = delete;
-  Queue &operator=(const Queue &) = delete;
+  Queue(const Queue&) = delete;
+  Queue& operator=(const Queue&) = delete;
 
-  template <typename... Args> void emplace(Args &&...args) noexcept {
-    static_assert(std::is_nothrow_constructible<T, Args &&...>::value,
+  template <typename... Args>
+  void emplace(Args&&... args) noexcept {
+    static_assert(std::is_nothrow_constructible<T, Args&&...>::value,
                   "T must be nothrow constructible with Args&&...");
     auto const head = head_.fetch_add(1);
-    auto &slot = slots_[idx(head)];
+    auto& slot = slots_[idx(head)];
     while (turn(head) * 2 != slot.turn.load(LoadMemoryOrder))
       ;
     slot.construct(std::forward<Args>(args)...);
     slot.turn.store(turn(head) * 2 + 1, StoreMemoryOrder);
   }
 
-  template <typename... Args> bool try_emplace(Args &&...args) noexcept {
-    static_assert(std::is_nothrow_constructible<T, Args &&...>::value,
+  template <typename... Args>
+  bool try_emplace(Args&&... args) noexcept {
+    static_assert(std::is_nothrow_constructible<T, Args&&...>::value,
                   "T must be nothrow constructible with Args&&...");
     auto head = head_.load(LoadMemoryOrder);
     for (;;) {
-      auto &slot = slots_[idx(head)];
+      auto& slot = slots_[idx(head)];
       if (turn(head) * 2 == slot.turn.load(LoadMemoryOrder)) {
         if (head_.compare_exchange_strong(head, head + 1)) {
           slot.construct(std::forward<Args>(args)...);
@@ -204,7 +266,7 @@ public:
     }
   }
 
-  void push(const T &v) noexcept {
+  void push(const T& v) noexcept {
     static_assert(std::is_nothrow_copy_constructible<T>::value,
                   "T must be nothrow copy constructible");
     emplace(v);
@@ -212,12 +274,12 @@ public:
 
   template <typename P,
             typename = typename std::enable_if<
-                std::is_nothrow_constructible<T, P &&>::value>::type>
-  void push(P &&v) noexcept {
+                std::is_nothrow_constructible<T, P&&>::value>::type>
+  void push(P&& v) noexcept {
     emplace(std::forward<P>(v));
   }
 
-  bool try_push(const T &v) noexcept {
+  bool try_push(const T& v) noexcept {
     static_assert(std::is_nothrow_copy_constructible<T>::value,
                   "T must be nothrow copy constructible");
     return try_emplace(v);
@@ -225,14 +287,14 @@ public:
 
   template <typename P,
             typename = typename std::enable_if<
-                std::is_nothrow_constructible<T, P &&>::value>::type>
-  bool try_push(P &&v) noexcept {
+                std::is_nothrow_constructible<T, P&&>::value>::type>
+  bool try_push(P&& v) noexcept {
     return try_emplace(std::forward<P>(v));
   }
 
-  void pop(T &v) noexcept {
+  void pop(T& v) noexcept {
     auto const tail = tail_.fetch_add(1);
-    auto &slot = slots_[idx(tail)];
+    auto& slot = slots_[idx(tail)];
     while (turn(tail) * 2 + 1 != slot.turn.load(LoadMemoryOrder))
       ;
     v = slot.move();
@@ -240,10 +302,10 @@ public:
     slot.turn.store(turn(tail) * 2 + 2, StoreMemoryOrder);
   }
 
-  bool try_pop(T &v) noexcept {
+  bool try_pop(T& v) noexcept {
     auto tail = tail_.load(LoadMemoryOrder);
     for (;;) {
-      auto &slot = slots_[idx(tail)];
+      auto& slot = slots_[idx(tail)];
       if (turn(tail) * 2 + 1 == slot.turn.load(LoadMemoryOrder)) {
         if (tail_.compare_exchange_strong(tail, tail + 1)) {
           v = slot.move();
@@ -268,7 +330,7 @@ public:
   ptrdiff_t size() const noexcept {
     // TODO: How can we deal with wrapped queue on 32bit?
     // return static_cast<ptrdiff_t>(head_.load(std::memory_order_relaxed) -
-                                //   tail_.load(std::memory_order_relaxed));
+    //   tail_.load(std::memory_order_relaxed));
     return static_cast<ptrdiff_t>(head_.load(LoadMemoryOrder) -
                                   tail_.load(StoreMemoryOrder));
   }
@@ -285,7 +347,7 @@ private:
 
 private:
   const size_t capacity_;
-  Slot<T> *slots_;
+  Slot<T>* slots_;
 #if defined(__has_cpp_attribute) && __has_cpp_attribute(no_unique_address)
   Allocator allocator_ [[no_unique_address]];
 #else
