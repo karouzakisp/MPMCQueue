@@ -452,12 +452,6 @@ public:
   void push(P&& v) noexcept {
     emplace(std::forward<P>(v));
   }
-  template <typename P,
-            typename = typename std::enable_if<
-                std::is_nothrow_constructible<T, P&&>::value>::type>
-  void push_p(P&& v) noexcept {
-    emplace_p(std::forward<P>(v));
-  }
 
   bool try_push(const T& v) noexcept {
     static_assert(std::is_nothrow_copy_constructible<T>::value,
