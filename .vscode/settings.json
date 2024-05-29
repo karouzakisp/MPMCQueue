@@ -1,3 +1,8 @@
 {
-    "editor.formatOnSave": true
+    "editor.formatOnSave": true,
+    "files.associations": {
+        "*.alpha": "javascript",
+        "*.module": "php",
+        "new": "cpp"
+    }
 }

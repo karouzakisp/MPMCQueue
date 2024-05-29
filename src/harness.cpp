@@ -34,7 +34,8 @@ static long nops;
 #define COV_THRESHOLD 0.02
 #endif
 
-#define SZ 100'000'000
+// #define SZ 100'000'000
+#define SZ 100
 
 static pthread_barrier_t barrier;
 static double times[MAX_ITERS];
@@ -42,9 +43,7 @@ static double means[MAX_ITERS];
 static double covs[MAX_ITERS];
 static volatile int target;
 
-using namespace rigtorp;
-
-MPMCQueue<void*> q(SZ, false);
+rigtorp::MPMCQueue<void*> q(SZ, true);
 
 static size_t elapsed_time(size_t us) {
   struct timeval t;

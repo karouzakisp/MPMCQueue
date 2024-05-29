@@ -220,7 +220,7 @@ private:
 
     // Allocate one extra slot to prevent false sharing on the last slot
     if (pop_.root()->pSlots_ == nullptr) {
-      make_persistent_atomic<PSlotArray>(pop_, pSlots_, capacity_ + 1);
+      pmem::obj::make_persistent_atomic<PSlotArray>(pop_, pSlots_, capacity_ + 1);
       pop_.root()->pSlots_ = pSlots_;
       // TODO: Make sure each pSlot is aligned. Honor the guarantees of the non-persistent constructor
       /*     if (reinterpret_cast<size_t>(slots_) % alignof(Slot<T>) != 0) {
@@ -251,7 +251,7 @@ private:
   }
 
   void QueueDestroyPersistent() {
-    delete_persistent_atomic<PSlotArray>(pSlots_, capacity_ + 1);
+    pmem::obj::delete_persistent_atomic<PSlotArray>(pSlots_, capacity_ + 1);
     pSlots_ = nullptr;
     pop_.root()->pSlots_ = nullptr;
   }

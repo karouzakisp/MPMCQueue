@@ -8,7 +8,7 @@
             "name": "mpmcqueue_bench",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/mpmcqueue_bench",
+            "program": "${workspaceFolder}/build/mpmcqueue_bench",
             "args": [
                 "2"
             ],
@@ -35,7 +35,7 @@
             "name": "recover",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/recover",
+            "program": "${workspaceFolder}/build/recover",
             "args": [
                 "2"
             ],
