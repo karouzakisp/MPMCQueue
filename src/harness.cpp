@@ -124,11 +124,10 @@ void* benchmark(int id, int nprocs) {
 
   int i;
   for (i = 0; i < nops / nprocs; ++i) {
-    q.push(&val);
+    q.push_p(&val);
     delay_exec(&state);
 
-    void* ret{nullptr};
-    q.pop(ret);
+    q.pop_p(val);
     delay_exec(&state);
   }
 

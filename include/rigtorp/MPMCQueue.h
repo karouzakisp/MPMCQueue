@@ -215,11 +215,25 @@ private:
     if (RootPool::check(filepath, layout) == 1) {
       pop_ = RootPool::open(filepath, layout);
     } else {
-      pop_ = RootPool::create(filepath, layout, PMEMOBJ_MIN_POOL);
+      pop_ = RootPool::create(filepath, layout, 1024 * 1024 * 500);
     }
 
     // Allocate one extra slot to prevent false sharing on the last slot
     if (pop_.root()->pSlots_ == nullptr) {
+      /*      struct myPExpSlot {
+              int x;
+              int y;
+            };
+            size_t MyPCapacity_ = 10'000'000;
+            using MyPExpPSlotArray = myPExpSlot[];
+            // struct myRoot {
+            //  MyExpPSlotArray mypSlots_;
+            //};
+            // using myRootPool = pmem::obj::pool<myRoot>;
+            // myRootPool myPop_;
+            pmem::obj::persistent_ptr<MyPExpPSlotArray> myPExpSlots_;
+            pmem::obj::make_persistent_atomic<MyPExpPSlotArray>(pop_, myPExpSlots_, MyPCapacity_ + 1);
+      */
       pmem::obj::make_persistent_atomic<PSlotArray>(pop_, pSlots_, capacity_ + 1);
       pop_.root()->pSlots_ = pSlots_;
       // TODO: Make sure each pSlot is aligned. Honor the guarantees of the non-persistent constructor
@@ -279,8 +293,7 @@ public:
                   "T must be nothrow constructible with Args&&...");
     auto const head = head_.fetch_add(1);
     auto& slot = slots_[idx(head)];
-    while (turn(head) * 2 != slot.turn.load(std::memory_order_acquire))
-      ;
+    while (turn(head) * 2 != slot.turn.load(std::memory_order_acquire));
     slot.construct(std::forward<Args>(args)...);
     slot.turn.store(turn(head) * 2 + 1, std::memory_order_release);
   }
@@ -290,11 +303,10 @@ public:
     static_assert(std::is_nothrow_constructible<T, Args&&...>::value,
                   "T must be nothrow constructible with Args&&...");
     auto const head = head_.fetch_add(1);
-    auto& slot = slots_[idx(head)];
-    while (turn(head) * 2 != slot.get_ro().turn.get_ro().load(LoadMemoryOrder))
-      ;
-    slot.get_ro().construct(std::forward<Args>(args)...);
-    slot.get_ro().turn.get_ro().store(turn(head) * 2 + 1, StoreMemoryOrder);
+    pmem::obj::p<MySlot<T>>& slot = pSlots_[idx(head)];
+    while (turn(head) * 2 != slot.get_ro().turn.load(LoadMemoryOrder));
+    slot.get_rw().construct(std::forward<Args>(args)...);
+    slot.get_rw().turn.store(turn(head) * 2 + 1, StoreMemoryOrder);
     pop_.persist(slot);
   }
 
@@ -361,8 +373,7 @@ public:
   void pop(T& v) noexcept {
     auto const tail = tail_.fetch_add(1);
     auto& slot = slots_[idx(tail)];
-    while (turn(tail) * 2 + 1 != slot.turn.load(std::memory_order_acquire))
-      ;
+    while (turn(tail) * 2 + 1 != slot.turn.load(std::memory_order_acquire));
     v = slot.move();
     slot.destroy();
     slot.turn.store(turn(tail) * 2 + 2, std::memory_order_release);
@@ -370,12 +381,12 @@ public:
 
   void pop_p(T& v) noexcept {
     auto const tail = tail_.fetch_add(1);
-    auto& slot = slots_[idx(tail)];
-    while (turn(tail) * 2 + 1 != slot.get_ro().turn.get_ro().load(LoadMemoryOrder))
-      ;
-    v = slot.get_ro().move();
-    slot.get_ro().destroy();
-    slot.get_ro().turn.get_ro().store(turn(tail) * 2 + 2, StoreMemoryOrder);
+    pmem::obj::p<MySlot<T>>& slot = pSlots_[idx(tail)];
+    while (turn(tail) * 2 + 1 != slot.get_ro().turn.load(LoadMemoryOrder));
+    // v = slot.move();
+    // slot.destroy();
+    v = slot.get_rw().move();
+    slot.get_rw().turn.store(turn(tail) * 2 + 2, StoreMemoryOrder);
     pop_.persist(slot);
   }
 
