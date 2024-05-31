@@ -25,6 +25,8 @@ SOFTWARE.
 #include <atomic>
 #include <cassert>
 #include <cstddef> // offsetof
+#include <filesystem>
+#include <iostream>
 #include <limits>
 #include <memory>
 #include <new> // std::hardware_destructive_interference_size
@@ -212,12 +214,17 @@ private:
     }
     const char* filepath = "poolfile";
     const char* layout = "layout";
-    if (RootPool::check(filepath, layout) == 1) {
-      pop_ = RootPool::open(filepath, layout);
-    } else {
+    // std::filesystem exists check
+    if (std::filesystem::exists(filepath) == false) {
       pop_ = RootPool::create(filepath, layout, 1024 * 1024 * 500);
+      pop_.close();
+    }
+    int checkPool = RootPool::check(filepath, layout);
+    if (checkPool == 0) {
+      assert(false && "Error: poolfile is in inconsistent state");
     }
 
+    pop_ = RootPool::open(filepath, layout);
     // Allocate one extra slot to prevent false sharing on the last slot
     if (pop_.root()->pSlots_ == nullptr) {
       /*      struct myPExpSlot {
@@ -268,6 +275,7 @@ private:
     pmem::obj::delete_persistent_atomic<PSlotArray>(pSlots_, capacity_ + 1);
     pSlots_ = nullptr;
     pop_.root()->pSlots_ = nullptr;
+    pop_.close();
   }
 
 public:

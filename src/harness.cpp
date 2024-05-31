@@ -13,6 +13,8 @@
 #include <sys/time.h>
 #include <unistd.h>
 
+#define VERIFY
+
 #ifndef LOGN_OPS
 #define LOGN_OPS 5
 #endif
@@ -124,7 +126,7 @@ void* benchmark(int id, int nprocs) {
 
   int i;
   for (i = 0; i < nops / nprocs; ++i) {
-    q.push_p(&val);
+    q.push_p(val);
     delay_exec(&state);
 
     q.pop_p(val);

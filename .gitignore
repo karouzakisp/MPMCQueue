@@ -5,3 +5,4 @@ cmake-build-*
 .project
 *~
 mpmcqueue_bench
+poolfile
