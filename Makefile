@@ -3,12 +3,18 @@ SRC_DIR := src
 BUILD_DIR := build
 
 CC := g++
-CFLAGS := -g -Wall -pthread -I$(INCLUDE_DIR) -O0 #-O3
+# CFLAGS := -g -Wall -pthread -I$(INCLUDE_DIR) -O0 #-O3
+CXXFLAGS := -I$(INCLUDE_DIR) -Wall -Wextra -Wshadow -Wnon-virtual-dtor -Wpedantic \
+-Wold-style-cast -Wcast-align -Woverloaded-virtual -Wconversion -Wsign-conversion \
+-Wmisleading-indentation -Wduplicated-cond -Wduplicated-branches -Wlogical-op \
+-Wnull-dereference -Wuseless-cast -Wdouble-promotion -Wformat=2 -Wunused \
+-std=c++23 -g3 -O0 #-O3
+NOCXXFLAGS := -Wno-old-style-cast -Wno-sign-conversion -Wno-shadow -Wno-conversion -Wno-unused-parameter -Wno-vla -Wno-invalid-offsetof
 LDLIBS := -lpthread -lm -lpmemobj
 
 VERIFY = 1
 ifeq (${VERIFY}, 1)
-	CFLAGS += -DVERIFY
+	CXXFLAGS += -DVERIFY
 endif
 
 SRCS := $(SRC_DIR)/halfhalf.c $(SRC_DIR)/pairwise.c $(SRC_DIR)/harness.cpp
@@ -21,18 +27,12 @@ RECOVER_TEST := $(BUILD_DIR)/recover_test
 all: $(MPMCQUEUE_BENCH) $(RECOVER_TEST)
 
 $(MPMCQUEUE_BENCH): $(SRCS)
-	$(CC) $(CFLAGS) -o $@  $^ $(LDLIBS)
+	$(CC) $(CXXFLAGS) $(NOCXXFLAGS) -o $@  $^ $(LDLIBS)
 
 clean:
 	$(RM) $(MPMCQUEUE_BENCH) $(RECOVER_TEST)
 
-CXXFLAGS := -I$(INCLUDE_DIR) -Wall -Wextra -Wshadow -Wnon-virtual-dtor -Wpedantic \
--Wold-style-cast -Wcast-align -Woverloaded-virtual -Wconversion -Wsign-conversion \
--Wmisleading-indentation -Wduplicated-cond -Wduplicated-branches -Wlogical-op \
--Wnull-dereference -Wuseless-cast -Wdouble-promotion -Wformat=2 \
--Wunused \
--std=c++23 -g3 -O0
-#-O3
+
 
 $(RECOVER_TEST): $(SRC_DIR)/RecoverTest.cpp
 	$(CC) $(CXXFLAGS) -o $@ $^ $(LDLIBS)
