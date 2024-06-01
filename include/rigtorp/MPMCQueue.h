@@ -136,11 +136,8 @@ class Queue {
 
 public:
   using SlotSpan = std::span<Slot<T>>;
-  auto RecoverTest(SlotSpan input) -> std::tuple<SlotSpan, size_t, size_t> {
-    // return RecoverImpl(input);
-
-    pmem::obj::persistent_ptr<Slot<T>[]> slotsPtr;
-    return RecoverImpl(SlotSpan{slotsPtr.get() + capacity_});
+  auto RecoverTest(Slot<T>* input, std::size_t cap) -> std::tuple<SlotSpan, size_t, size_t> {
+    return RecoverImpl(SlotSpan{input, cap});
   }
 
 private:
@@ -163,7 +160,7 @@ private:
     return true;
   }
   auto RecoverImpl(const SlotSpan input) -> std::tuple<SlotSpan, size_t, size_t> {
-    assert(input);
+    assert(!input.empty());
     /*     assert(RecoverValidatePre(input));
         // find max turn and its last index
         const auto lastMaxR = std::ranges::max_element(slots.rbegin(), slots.rend(), [](auto a, auto b) { return a.turn < b.turn; });
