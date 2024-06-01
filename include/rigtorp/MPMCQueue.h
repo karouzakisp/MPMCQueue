@@ -127,7 +127,7 @@ struct Slot {
   typename std::aligned_storage<sizeof(T), alignof(T)>::type storage;
 };
 
-template <typename T>
+/* template <typename T>
 struct MySlot {
   ~MySlot() noexcept {
     if (turn & 1) {
@@ -150,14 +150,15 @@ struct MySlot {
 
   T&& move() noexcept { return reinterpret_cast<T&&>(storage); }
 
+  // Align to avoid false sharing between adjacent slots
   alignas(hardwareInterferenceSize) std::atomic<size_t> turn = {0};
   typename std::aligned_storage<sizeof(T), alignof(T)>::type storage;
-};
+}; */
 
 template <typename T, typename Allocator = AlignedAllocator<Slot<T>>>
 class Queue {
 private:
-  using PSlot = pmem::obj::p<MySlot<T>>; // only persist slot
+  using PSlot = pmem::obj::p<Slot<T>>; // only persist slot
   using PSlotArray = PSlot[];
   using SlotArrayPPtr = pmem::obj::persistent_ptr<PSlotArray>;
   struct Root {
@@ -301,7 +302,8 @@ public:
                   "T must be nothrow constructible with Args&&...");
     auto const head = head_.fetch_add(1);
     auto& slot = slots_[idx(head)];
-    while (turn(head) * 2 != slot.turn.load(std::memory_order_acquire));
+    while (turn(head) * 2 != slot.turn.load(std::memory_order_acquire))
+      ;
     slot.construct(std::forward<Args>(args)...);
     slot.turn.store(turn(head) * 2 + 1, std::memory_order_release);
   }
@@ -311,8 +313,9 @@ public:
     static_assert(std::is_nothrow_constructible<T, Args&&...>::value,
                   "T must be nothrow constructible with Args&&...");
     auto const head = head_.fetch_add(1);
-    pmem::obj::p<MySlot<T>>& slot = pSlots_[idx(head)];
-    while (turn(head) * 2 != slot.get_ro().turn.load(LoadMemoryOrder));
+    PSlot& slot = pSlots_[idx(head)];
+    while (turn(head) * 2 != slot.get_ro().turn.load(LoadMemoryOrder))
+      ;
     slot.get_rw().construct(std::forward<Args>(args)...);
     slot.get_rw().turn.store(turn(head) * 2 + 1, StoreMemoryOrder);
     pop_.persist(slot);
@@ -381,7 +384,8 @@ public:
   void pop(T& v) noexcept {
     auto const tail = tail_.fetch_add(1);
     auto& slot = slots_[idx(tail)];
-    while (turn(tail) * 2 + 1 != slot.turn.load(std::memory_order_acquire));
+    while (turn(tail) * 2 + 1 != slot.turn.load(std::memory_order_acquire))
+      ;
     v = slot.move();
     slot.destroy();
     slot.turn.store(turn(tail) * 2 + 2, std::memory_order_release);
@@ -389,8 +393,9 @@ public:
 
   void pop_p(T& v) noexcept {
     auto const tail = tail_.fetch_add(1);
-    pmem::obj::p<MySlot<T>>& slot = pSlots_[idx(tail)];
-    while (turn(tail) * 2 + 1 != slot.get_ro().turn.load(LoadMemoryOrder));
+    PSlot& slot = pSlots_[idx(tail)];
+    while (turn(tail) * 2 + 1 != slot.get_ro().turn.load(LoadMemoryOrder))
+      ;
     // v = slot.move();
     // slot.destroy();
     v = slot.get_rw().move();

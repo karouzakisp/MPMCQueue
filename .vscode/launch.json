@@ -9,9 +9,7 @@
             "type": "cppdbg",
             "request": "launch",
             "program": "${workspaceFolder}/build/mpmcqueue_bench",
-            "args": [
-                "2"
-            ],
+            "args": [],
             "stopAtEntry": false,
             "cwd": "${fileDirname}",
             "environment": [],
@@ -36,9 +34,7 @@
             "type": "cppdbg",
             "request": "launch",
             "program": "${workspaceFolder}/build/recover",
-            "args": [
-                "2"
-            ],
+            "args": [],
             "stopAtEntry": false,
             "cwd": "${fileDirname}",
             "environment": [],
