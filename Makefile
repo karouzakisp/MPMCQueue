@@ -9,6 +9,7 @@ CXXFLAGS := -I$(INCLUDE_DIR) -Wall -Wextra -Wshadow -Wnon-virtual-dtor -Wpedanti
 -Wmisleading-indentation -Wduplicated-cond -Wduplicated-branches -Wlogical-op \
 -Wnull-dereference -Wuseless-cast -Wdouble-promotion -Wformat=2 -Wunused \
 -std=c++23 -g3 -O0 #-O3
+NOCXXFLAGSRECOVER := -Wno-invalid-offsetof
 NOCXXFLAGS := -Wno-old-style-cast -Wno-sign-conversion -Wno-shadow -Wno-conversion -Wno-unused-parameter -Wno-vla -Wno-invalid-offsetof
 LDLIBS := -lpthread -lm -lpmemobj
 
@@ -35,4 +36,4 @@ clean:
 
 
 $(RECOVER_TEST): $(SRC_DIR)/RecoverTest.cpp
-	$(CC) $(CXXFLAGS) -o $@ $^ $(LDLIBS)
+	$(CC) $(CXXFLAGS) $(NOCXXFLAGSRECOVER) -o $@ $^ $(LDLIBS)

@@ -33,7 +33,7 @@
             "name": "recover_test",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/build/recover",
+            "program": "${workspaceFolder}/build/recover_test",
             "args": [],
             "stopAtEntry": false,
             "cwd": "${fileDirname}",

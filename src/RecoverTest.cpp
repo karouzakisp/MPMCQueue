@@ -1,6 +1,5 @@
 #include <algorithm>
 #include <cassert>
-#include <initializer_list>
 #include <iostream>
 #include <numeric>
 #include <span>
@@ -10,41 +9,81 @@
 #include "rigtorp/MPMCQueue.h"
 
 namespace {
-// template <typename T>
-// struct Slot {
-//   Slot(size_t t) : turn{t} {}
-//   size_t turn;
-//   T storage{};
-//   auto operator<=>(const Slot&) const = default;
-// };
 using Type = long;
-using Slots = std::vector<rigtorp::mpmc::Slot<Type>>;
+using SlotSpan = std::span<rigtorp::mpmc::Slot<Type>>;
+struct Slots : public std::vector<rigtorp::mpmc::Slot<Type>> {
+  auto operator<=>(const Slots&) const = default;
+  Slots(size_t sz) : std::vector<rigtorp::mpmc::Slot<Type>>(sz) {}
+  Slots(SlotSpan span) : Slots{span.size()} {
+    for (auto i = 0u; i < span.size(); ++i) {
+      auto& v = span[i];
+      this->at(i).turn.store(v.turn.load());
+      Type st = *reinterpret_cast<const Type*>(&(v.storage));
+      this->at(i).construct(st);
+    }
+  }
+  Slots(const std::vector<Type>& vec) : Slots{vec.size()} {
+    for (auto i = 0u; i < vec.size(); ++i) {
+      auto& v = vec.at(i);
+      this->at(i).turn.store(static_cast<size_t>(v));
+      this->at(i).construct(v);
+    }
+  }
+
+  Slots(const Slots& other) : Slots{other.size()} {
+    for (auto i = 0u; i < other.size(); ++i) {
+      auto& v = other.at(i);
+      this->at(i).turn.store(v.turn.load());
+      Type st = *reinterpret_cast<const Type*>(&(v.storage));
+      this->at(i).construct(st);
+    }
+  }
+
+  Slots& operator=(const Slots& other) {
+    if (this == &other) return *this;
+    for (auto i = 0u; i < other.size(); ++i) {
+      auto& v = other.at(i);
+      this->at(i).turn.store(v.turn.load());
+      Type st = *reinterpret_cast<const Type*>(&(v.storage));
+      this->at(i).construct(st);
+    }
+    return *this;
+  }
+
+  bool operator==(const Slots& other) const {
+    if (size() != other.size()) return false;
+    for (auto i = 0u; i < other.size(); ++i) {
+      const auto& a = at(i);
+      const auto& b = other.at(i);
+      auto GetStorage = [](const auto& x) -> Type { return *reinterpret_cast<const Type*>(&(x.storage)); };
+      if (a.turn != b.turn || GetStorage(a) != GetStorage(b)) return false;
+    }
+    return true;
+  }
+};
 struct State {
   Slots slots;
   size_t tail; // dequeuers
   size_t head; // enqueuers
-  auto operator<=>(const State&) const = default;
+  bool operator==(const State&) const = default;
+  //   auto operator<=>(const State&) const = default;
 };
 struct Test {
   Slots input;
   State expected;
   State result;
-  Test(std::initializer_list<Type> i, std::initializer_list<Type> e, size_t eTail, size_t eHead) {
-    for (const auto& v : i) input.emplace_back(v, v);
-    for (const auto& v : e) expected.slots.emplace_back(v, v);
-    expected.tail = eTail;
-    expected.head = eHead;
+  Test(std::vector<Type> inputVec, std::vector<Type> expectedVec, size_t eTail, size_t eHead)
+      : input{inputVec}, expected{expectedVec, eTail, eHead}, result{expectedVec.size(), 0u, 0u} {
+    assert(inputVec.size() == expectedVec.size());
   }
 };
 
-template <typename T>
-std::ostream& operator<<(std::ostream& os, const rigtorp::mpmc::Slot<T>& s) {
+std::ostream& operator<<(std::ostream& os, const rigtorp::mpmc::Slot<Type>& s) {
   os << s.turn;
   return os;
 }
-template <typename T>
-std::ostream& operator<<(std::ostream& os, const std::vector<T>& vec) {
-  for (const auto& v : vec)
+std::ostream& operator<<(std::ostream& os, const Slots& slots) {
+  for (const auto& v : slots)
     os << v << ".";
   return os;
 }
@@ -73,17 +112,14 @@ std::vector<Test> Tests{
     {{4, 2, 2, 4}, {4, 4, 4, 4}, 8, 8},
     {{4, 2, 3, 4}, {4, 4, 4, 4}, 8, 8},
     {{2, 3, 4, 2}, {4, 4, 4, 2}, 7, 7},
-    {{0, 1, 1, 2}, {2, 2, 2, 2}, 4, 4}
-
-};
-
+    {{0, 1, 1, 2}, {2, 2, 2, 2}, 4, 4}};
 } // namespace
 
 int main() {
+  rigtorp::mpmc::Queue<Type> q{1, false};
   for (auto& test : Tests) {
-    rigtorp::mpmc::Queue<Type> q{test.input.size()};
-    auto [slots, tail, head] = q.RecoverTest({test.input});
-    test.result = State{Slots{slots.begin(), slots.end()}, tail, head};
+    auto [slots, tail, head] = q.RecoverTest(test.input.data(), test.input.size());
+    test.result = {slots, tail, head};
   }
   for (const auto& test : Tests)
     std::cout << test << "\n";
