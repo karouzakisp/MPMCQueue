@@ -225,6 +225,7 @@ private:
       p.get_rw().turn.store(v.turn);
       p.get_rw().construct(v.storage);
     }
+    // pool.persist(pSlotArray.get(), sz);
     return pSlots;
   }
 
@@ -299,7 +300,6 @@ private:
     }
     const char* filepath = "poolfile";
     const char* layout = "layout";
-    // std::filesystem exists check
     if (std::filesystem::exists(filepath) == false) {
       pop_ = RootPool::create(filepath, layout, 1024 * 1024 * 500);
       pop_.close();
@@ -307,27 +307,13 @@ private:
     int checkPool = RootPool::check(filepath, layout);
     if (checkPool == 0) {
       assert(false && "Error: poolfile is in inconsistent state");
+      throw std::runtime_error("poolfile is in inconsistent state");
     }
-
     pop_ = RootPool::open(filepath, layout);
-    // Allocate one extra slot to prevent false sharing on the last slot
-    if (pop_.root()->pSlots_ == nullptr) {
-      /*      struct myPExpSlot {
-              int x;
-              int y;
-            };
-            size_t MyPCapacity_ = 10'000'000;
-            using MyPExpPSlotArray = myPExpSlot[];
-            // struct myRoot {
-            //  MyExpPSlotArray mypSlots_;
-            //};
-            // using myRootPool = pmem::obj::pool<myRoot>;
-            // myRootPool myPop_;
-            pmem::obj::persistent_ptr<MyPExpPSlotArray> myPExpSlots_;
-            pmem::obj::make_persistent_atomic<MyPExpPSlotArray>(pop_, myPExpSlots_, MyPCapacity_ + 1);
-      */
-      pmem::obj::make_persistent_atomic<PSlotArray>(pop_, pSlots_, capacity_ + 1);
-      pop_.root()->pSlots_ = pSlots_;
+    auto& rootPSlots = pop_.root()->pSlots_;
+    if (rootPSlots == nullptr) {
+      // Allocate one extra slot to prevent false sharing on the last slot
+      pmem::obj::make_persistent_atomic<PSlotArray>(pop_, rootPSlots, capacity_ + 1);
       pop_.root().persist();
       // TODO: Make sure each pSlot is aligned. Honor the guarantees of the non-persistent constructor
       /*     if (reinterpret_cast<size_t>(slots_) % alignof(Slot<T>) != 0) {
@@ -338,8 +324,8 @@ private:
             new (&slots_[i]) Slot<T>();
           } */
     }
-
-    // TODO: Call Recover() around here
+    Recover();
+    pSlots_ = rootPSlots.get();
 
     // TODO: Make sure each pSlot is aligned. Honor the guarantees of the non-persistent constructor
     static_assert(
@@ -358,9 +344,9 @@ private:
   }
 
   void QueueDestroyPersistent() {
-    pmem::obj::delete_persistent_atomic<PSlotArray>(pSlots_, capacity_ + 1);
-    pSlots_ = nullptr;
-    pop_.root()->pSlots_ = nullptr;
+    auto& rootPSlots = pop_.root()->pSlots_;
+    pmem::obj::delete_persistent_atomic<PSlotArray>(rootPSlots, capacity_ + 1);
+    rootPSlots = nullptr;
     pop_.root().persist();
     pop_.close();
   }
@@ -383,12 +369,16 @@ public:
   Queue& operator=(const Queue&) = delete;
 
   auto Recover() -> void {
-    PSlotArrayPPtr newPSlots = RecoverImpl(pop_, std::span<PSlot>{pop_.root()->pSlots_.get(), capacity_});
-    pop_.root()->pSlots_ = newPSlots;
+    auto [span, t, h] = RecoverImpl(pop_, std::span<PSlot>{pop_.root()->pSlots_.get(), capacity_});
+    auto& rootPSlots = pop_.root()->pSlots_;
+    auto prev = rootPSlots;
+    rootPSlots = span.data();
     pop_.root().persist();
+    tail_ = t;
+    head_ = h;
     // if Failure here, then Persistent Memory Leak
-    pmem::obj::delete_persistent_atomic<PSlotArray>(pSlots_, capacity_ + 1);
-    pSlots_ = newPSlots;
+    if (prev != rootPSlots)
+      pmem::obj::delete_persistent_atomic<PSlotArray>(prev, capacity_ + 1);
   }
 
   template <typename... Args>
@@ -553,7 +543,7 @@ private:
 
   bool isPersistent_;
   RootPool pop_;
-  PSlotArrayPPtr pSlots_;
+  PSlot* pSlots_;
 
 public:
   auto RecoverTest(pmem::obj::pool_base pool, PSlot* input, std::size_t cap) {
