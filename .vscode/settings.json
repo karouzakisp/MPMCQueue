@@ -3,6 +3,7 @@
     "files.associations": {
         "*.alpha": "javascript",
         "*.module": "php",
-        "new": "cpp"
+        "new": "cpp",
+        "type_traits": "cpp"
     }
 }

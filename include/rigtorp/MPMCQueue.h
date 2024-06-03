@@ -22,6 +22,7 @@ SOFTWARE.
 
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <cassert>
 #include <cstddef> // offsetof
@@ -30,6 +31,7 @@ SOFTWARE.
 #include <limits>
 #include <memory>
 #include <new> // std::hardware_destructive_interference_size
+#include <numeric>
 #include <span>
 #include <stdexcept>
 #include <tuple>
@@ -161,15 +163,21 @@ struct MySlot {
 
 template <typename T, typename Allocator = AlignedAllocator<Slot<T>>>
 class Queue {
-private:
+public:
+  struct VSlot {
+    std::size_t turn{};
+    T storage{};
+    bool operator==(const VSlot&) const = default;
+  };
   using PSlot = pmem::obj::p<Slot<T>>; // only persist slot
   using PSlotArray = PSlot[];
-  using SlotArrayPPtr = pmem::obj::persistent_ptr<PSlotArray>;
+  using PSlotArrayPPtr = pmem::obj::persistent_ptr<PSlotArray>;
+
+private:
   struct Root {
-    SlotArrayPPtr pSlots_;
+    PSlotArrayPPtr pSlots_;
   };
   using RootPool = pmem::obj::pool<Root>;
-  using SlotSpan = std::span<Slot<T>>;
   static_assert(std::is_nothrow_copy_assignable<T>::value ||
                     std::is_nothrow_move_assignable<T>::value,
                 "T must be nothrow copy or move assignable");
@@ -177,51 +185,75 @@ private:
   static_assert(std::is_nothrow_destructible<T>::value,
                 "T must be nothrow destructible");
 
-  auto RecoverValidatePre(const SlotSpan input) -> bool {
+  auto RecoverValidatePre(std::span<const PSlot> slots) -> bool {
     bool preCondition;
-    const auto [min, max] = std::ranges::minmax_element(input, [](const Slot<T>& a, const Slot<T>& b) { return a.turn < b.turn; });
-    preCondition = (max->turn - min->turn) <= 2;
+    const auto [min, max] = std::ranges::minmax_element(slots, [](const auto& a, const auto& b) { return a.get_ro().turn < b.get_ro().turn; });
+    preCondition = (max->get_ro().turn - min->get_ro().turn) <= 2;
     if (!preCondition) return false;
     return true;
   }
-  auto RecoverValidatePost(const SlotSpan input) -> bool {
-    return std::ranges::is_sorted(input, [](const Slot<T>& a, const Slot<T>& b) { return a.turn > b.turn; });
+  auto RecoverValidatePost(std::span<const PSlot> slots) -> bool {
+    return std::ranges::is_sorted(slots, [](const auto& a, const auto& b) { return a.get_ro().turn > b.get_ro().turn; });
   }
-  auto CalculateTailHead(const SlotSpan slots) -> std::tuple<size_t, size_t> {
-    const auto firstZero = std::ranges::find_if(slots, [](const Slot<T>& a) { return a.turn == 0; });
-    size_t tail = std::accumulate(slots.begin(), firstZero, 0ULL, [](auto acc, const Slot<T>& slot) { return acc + slot.turn / 2; });
-    size_t head = std::accumulate(slots.begin(), firstZero, 0ULL, [](auto acc, const Slot<T>& slot) { return acc + (slot.turn + 1) / 2; });
+  auto CalculateTailHead(std::span<const PSlot> slots) -> std::tuple<size_t, size_t> {
+    const auto firstZero = std::ranges::find_if(slots, [](const auto& a) { return a.get_ro().turn == 0; });
+    size_t tail = std::accumulate(slots.begin(), firstZero, 0ULL, [](auto acc, const auto& slot) { return acc + slot.get_ro().turn / 2; });
+    size_t head = std::accumulate(slots.begin(), firstZero, 0ULL, [](auto acc, const auto& slot) { return acc + (slot.get_ro().turn + 1) / 2; });
     return {tail, head};
   }
-  auto RecoverImpl(const SlotSpan input) -> std::tuple<SlotSpan, size_t, size_t> {
-    assert(!input.empty());
-    assert(RecoverValidatePre(input));
-    // TODO: Have a bool in persistence indicating the array is sorted
-    bool isSorted = std::ranges::is_sorted(input, [](const Slot<T>& a, const Slot<T>& b) { return a.turn > b.turn; });
-    if (isSorted) {
-      const auto [tail, head] = CalculateTailHead(input);
-      return {input, tail, head};
+  auto CalculateTailHead(std::span<const VSlot> slots) -> std::tuple<size_t, size_t> {
+    const auto firstZero = std::ranges::find_if(slots, [](const auto& a) { return a.turn == 0; });
+    size_t tail = std::accumulate(slots.begin(), firstZero, 0ULL, [](auto acc, const auto& slot) { return acc + slot.turn / 2; });
+    size_t head = std::accumulate(slots.begin(), firstZero, 0ULL, [](auto acc, const auto& slot) { return acc + (slot.turn + 1) / 2; });
+    return {tail, head};
+  }
+  auto GetVSlots(std::span<const PSlot> pSlots) -> std::vector<VSlot> {
+    std::vector<VSlot> vec{};
+    for (const auto& s : pSlots) {
+      vec.emplace_back(s.get_ro().turn.load(), *reinterpret_cast<const T*>(&(s.get_ro().storage)));
     }
-    SlotSpan volatileSlots{}; // Deleteme
-    // SlotSpan slots = input; //TODO: Find a way to copy input to slots
+    return vec;
+  }
+  auto GetPSlots(pmem::obj::pool_base pool, std::span<const VSlot> vSlots) -> std::span<PSlot> {
+    const auto sz = vSlots.size();
+    PSlotArrayPPtr pSlotArray{};
+    pmem::obj::make_persistent_atomic<PSlotArray>(pool, pSlotArray, sz + 1);
+    std::span<PSlot> pSlots{pSlotArray.get(), sz};
+    for (auto i = 0u; i < sz; ++i) {
+      auto& p = pSlots[i];
+      auto& v = vSlots[i];
+      p.get_rw().turn.store(v.turn);
+      p.get_rw().construct(v.storage);
+    }
+    return pSlots;
+  }
+
+  auto RecoverImpl(pmem::obj::pool_base pool, std::span<PSlot> pSlots) -> std::tuple<std::span<PSlot>, size_t, size_t> {
+    assert(!pSlots.empty());
+    assert(RecoverValidatePre(pSlots));
+    bool isSorted = std::ranges::is_sorted(pSlots, [](const auto& a, const auto& b) { return a.get_ro().turn > b.get_ro().turn; });
+    if (isSorted) {
+      const auto [tail, head] = CalculateTailHead(pSlots);
+      return {pSlots, tail, head};
+    }
+    std::vector<VSlot> vSlots = GetVSlots(pSlots);
     // find max turn and its last index
-    const auto lastMaxRIt = std::ranges::max_element(volatileSlots.rbegin(), volatileSlots.rend(), [](const Slot<T>& a, const Slot<T>& b) { return a.turn < b.turn; });
-    assert(lastMaxRIt != volatileSlots.rend());
+    const auto lastMaxRIt = std::ranges::max_element(vSlots.rbegin(), vSlots.rend(), [](const auto& a, const auto& b) { return a.turn < b.turn; });
+    assert(lastMaxRIt != vSlots.rend());
     const auto lastMaxIt = lastMaxRIt.base() - 1;
-    const auto maxTurn = lastMaxIt->turn.load();
+    const auto maxTurn = lastMaxIt->turn;
     if ((maxTurn % 2) == 0) {
       // dequeues present, mark incomplete dequeues as complete and sort the rest of the enqueues
-      std::ranges::for_each(volatileSlots.begin(), lastMaxIt, [maxTurn](Slot<T>& a) { a.turn.store(maxTurn); });
-      // I cant sort because atomics are not copyable. .load() on a non-atomic container first, then sort, then .store back
-      //   std::ranges::stable_sort(lastMaxIt + 1, volatileSlots.end(), [](const Slot<T>& a, const Slot<T>& b) { return a.turn > b.turn; });
+      std::ranges::for_each(vSlots.begin(), lastMaxIt, [maxTurn](auto& a) { a.turn = maxTurn; });
+      std::ranges::stable_sort(lastMaxIt + 1, vSlots.end(), [](const auto& a, const auto& b) { return a.turn > b.turn; });
     } else {
       // only enqueues present, sort whole array
-      //   std::ranges::stable_sort(volatileSlots, [](const Slot<T>& a, const Slot<T>& b) { return a.turn > b.turn; });
+      std::ranges::stable_sort(vSlots, [](const auto& a, const auto& b) { return a.turn > b.turn; });
     }
-    const auto [tail, head] = CalculateTailHead(volatileSlots);
-    // input = slots; //TODO: Find a way to copy slots back to input
-    assert(RecoverValidatePost(input));
-    return {input, tail, head}; // return the modified input
+    const auto [tail, head] = CalculateTailHead(std::span<const VSlot>{vSlots.begin(), vSlots.end()});
+    std::span<PSlot> newPSlots = GetPSlots(pool, vSlots);
+    assert(RecoverValidatePost(newPSlots));
+    return {newPSlots, tail, head};
   }
 
   void QueueInit() {
@@ -296,6 +328,7 @@ private:
       */
       pmem::obj::make_persistent_atomic<PSlotArray>(pop_, pSlots_, capacity_ + 1);
       pop_.root()->pSlots_ = pSlots_;
+      pop_.root().persist();
       // TODO: Make sure each pSlot is aligned. Honor the guarantees of the non-persistent constructor
       /*     if (reinterpret_cast<size_t>(slots_) % alignof(Slot<T>) != 0) {
             allocator_.deallocate(slots_, capacity_ + 1);
@@ -328,6 +361,7 @@ private:
     pmem::obj::delete_persistent_atomic<PSlotArray>(pSlots_, capacity_ + 1);
     pSlots_ = nullptr;
     pop_.root()->pSlots_ = nullptr;
+    pop_.root().persist();
     pop_.close();
   }
 
@@ -348,8 +382,13 @@ public:
   Queue(const Queue&) = delete;
   Queue& operator=(const Queue&) = delete;
 
-  auto RecoverTest(Slot<T>* input, std::size_t cap) -> std::tuple<SlotSpan, size_t, size_t> {
-    return RecoverImpl(SlotSpan{input, cap});
+  auto Recover() -> void {
+    PSlotArrayPPtr newPSlots = RecoverImpl(pop_, std::span<PSlot>{pop_.root()->pSlots_.get(), capacity_});
+    pop_.root()->pSlots_ = newPSlots;
+    pop_.root().persist();
+    // if Failure here, then Persistent Memory Leak
+    pmem::obj::delete_persistent_atomic<PSlotArray>(pSlots_, capacity_ + 1);
+    pSlots_ = newPSlots;
   }
 
   template <typename... Args>
@@ -514,7 +553,12 @@ private:
 
   bool isPersistent_;
   RootPool pop_;
-  SlotArrayPPtr pSlots_;
+  PSlotArrayPPtr pSlots_;
+
+public:
+  auto RecoverTest(pmem::obj::pool_base pool, PSlot* input, std::size_t cap) {
+    return RecoverImpl(pool, std::span<PSlot>{input, cap});
+  }
 };
 } // namespace mpmc
 
