@@ -298,18 +298,18 @@ private:
     if (capacity_ < 1) {
       throw std::invalid_argument("capacity < 1");
     }
-    const char* filepath = "poolfile";
-    const char* layout = "layout";
-    if (std::filesystem::exists(filepath) == false) {
-      pop_ = RootPool::create(filepath, layout, 1024 * 1024 * 500);
+    const auto layout = std::filesystem::path{poolPath_}.filename().string();
+    if (std::filesystem::exists(poolPath_) == false) {
+      const std::size_t POOL_SIZE = 1024 * 1024 * 1024; // 1Gb
+      pop_ = RootPool::create(poolPath_, layout, POOL_SIZE);
       pop_.close();
     }
-    int checkPool = RootPool::check(filepath, layout);
+    int checkPool = RootPool::check(poolPath_, layout);
     if (checkPool == 0) {
       assert(false && "Error: poolfile is in inconsistent state");
       throw std::runtime_error("poolfile is in inconsistent state");
     }
-    pop_ = RootPool::open(filepath, layout);
+    pop_ = RootPool::open(poolPath_, layout);
     auto& rootPSlots = pop_.root()->pSlots_;
     if (rootPSlots == nullptr) {
       // Allocate one extra slot to prevent false sharing on the last slot
@@ -351,9 +351,8 @@ private:
   }
 
 public:
-  explicit Queue(const size_t capacity, bool isPersistent,
-                 const Allocator& allocator = Allocator())
-      : capacity_(capacity), allocator_(allocator), head_(0), tail_(0), isPersistent_(isPersistent) {
+  explicit Queue(size_t capacity, bool isPersistent, std::string poolPath, const Allocator& allocator = Allocator())
+      : capacity_(capacity), isPersistent_(isPersistent), poolPath_(poolPath), allocator_(allocator), head_(0), tail_(0) {
     if (isPersistent_) QueueInitPersistent();
     else QueueInit();
   }
@@ -528,18 +527,18 @@ private:
   constexpr size_t turn(size_t i) const noexcept { return i / capacity_; }
 
   const size_t capacity_;
-  Slot<T>* slots_;
+  bool isPersistent_;
+  std::string poolPath_;
 #if defined(__has_cpp_attribute) && __has_cpp_attribute(no_unique_address)
   Allocator allocator_ [[no_unique_address]];
 #else
   Allocator allocator_;
 #endif
-
   // Align to avoid false sharing between head_ and tail_
   alignas(hardwareInterferenceSize) std::atomic<size_t> head_;
   alignas(hardwareInterferenceSize) std::atomic<size_t> tail_;
+  Slot<T>* slots_;
 
-  bool isPersistent_;
   RootPool pop_;
   PSlot* pSlots_;
 

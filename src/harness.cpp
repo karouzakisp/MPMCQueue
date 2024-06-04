@@ -43,7 +43,8 @@ static double means[MAX_ITERS];
 static double covs[MAX_ITERS];
 static volatile int target;
 
-rigtorp::MPMCQueue<void*> q(SZ, true);
+const char* PoolPath = "/mnt/pmem0/myrontsa/MPMC";
+rigtorp::MPMCQueue<void*> q(SZ, true, PoolPath);
 
 static size_t elapsed_time(size_t us) {
   struct timeval t;
