@@ -324,7 +324,6 @@ private:
             new (&slots_[i]) Slot<T>();
           } */
     }
-    Recover();
     pSlots_ = rootPSlots.get();
 
     // TODO: Make sure each pSlot is aligned. Honor the guarantees of the non-persistent constructor
@@ -374,6 +373,7 @@ public:
     auto prev = rootPSlots;
     rootPSlots = span.data();
     pop_.root().persist();
+    pSlots_ = rootPSlots.get();
     tail_ = t;
     head_ = h;
     // if Failure here, then Persistent Memory Leak
