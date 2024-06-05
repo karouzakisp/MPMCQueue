@@ -14,7 +14,7 @@ CXXFLAGS := -I$(INCLUDE_DIR) -Wall -Wextra -Wshadow -Wnon-virtual-dtor -Wpedanti
 -std=c++23 -g3 -O0 #-O3
 NOCXXFLAGSRECOVER := -Wno-invalid-offsetof
 NOCXXFLAGS := -Wno-old-style-cast -Wno-sign-conversion -Wno-shadow -Wno-conversion -Wno-unused-parameter -Wno-vla -Wno-invalid-offsetof
-LDLIBS := -lpthread -lm -lpmemobj
+LDLIBS := -lpthread -lm -lpmemobj -lpmem
 
 ifeq (${VERIFY}, 1)
 	CXXFLAGS += -DVERIFY

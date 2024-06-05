@@ -44,6 +44,7 @@ SOFTWARE.
 #endif
 #endif
 
+#include <libpmem.h>
 #include <libpmemobj++/make_persistent_array_atomic.hpp>
 #include <libpmemobj++/p.hpp>
 #include <libpmemobj++/persistent_ptr.hpp>
@@ -327,6 +328,8 @@ private:
           } */
     }
     pSlots_ = rootPSlots.get();
+    bool isPmem = pmem_is_pmem(pSlots_, capacity_ + 1);
+    std::cout << "MPMC Persistent Memory Support: " << isPmem << "\n";
 
     // TODO: Make sure each pSlot is aligned. Honor the guarantees of the non-persistent constructor
     static_assert(
