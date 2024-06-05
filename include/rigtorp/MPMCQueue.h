@@ -295,6 +295,8 @@ private:
   }
 
   void QueueInitPersistent() {
+    if (isPersistent_ && poolPath_.empty())
+      throw std::invalid_argument("invalid pool path");
     if (capacity_ < 1) {
       throw std::invalid_argument("capacity < 1");
     }
@@ -351,7 +353,7 @@ private:
   }
 
 public:
-  explicit Queue(size_t capacity, bool isPersistent, std::string poolPath, const Allocator& allocator = Allocator())
+  explicit Queue(size_t capacity, bool isPersistent, std::string poolPath = {}, const Allocator& allocator = Allocator())
       : capacity_(capacity), isPersistent_(isPersistent), poolPath_(poolPath), allocator_(allocator), head_(0), tail_(0) {
     if (isPersistent_) QueueInitPersistent();
     else QueueInit();
@@ -367,6 +369,7 @@ public:
   Queue& operator=(const Queue&) = delete;
 
   auto Recover() -> void {
+    assert(isPersistent_);
     auto [span, t, h] = RecoverImpl(pop_, std::span<PSlot>{pop_.root()->pSlots_.get(), capacity_});
     auto& rootPSlots = pop_.root()->pSlots_;
     auto prev = rootPSlots;
