@@ -6,6 +6,22 @@
         "*.module": "php",
         "new": "cpp",
         "type_traits": "cpp",
-        "*.tcc": "cpp"
+        "*.tcc": "cpp",
+        "array": "cpp",
+        "functional": "cpp",
+        "memory": "cpp",
+        "tuple": "cpp",
+        "fstream": "cpp",
+        "iomanip": "cpp",
+        "istream": "cpp",
+        "limits": "cpp",
+        "mutex": "cpp",
+        "ostream": "cpp",
+        "numeric": "cpp",
+        "sstream": "cpp",
+        "stop_token": "cpp",
+        "streambuf": "cpp",
+        "utility": "cpp",
+        "thread": "cpp"
     }
 }

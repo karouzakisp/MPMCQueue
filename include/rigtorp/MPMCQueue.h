@@ -328,7 +328,8 @@ private:
           } */
     }
     pSlots_ = rootPSlots.get();
-    bool isPmem = pmem_is_pmem(pSlots_, capacity_ + 1);
+    //TODO: This returns 0. Why?
+    bool isPmem = pmem_is_pmem(pop_.root()->pSlots_.get(), (5 + 1) * sizeof(PSlot));
     std::cout << "MPMC Persistent Memory Support: " << isPmem << "\n";
 
     // TODO: Make sure each pSlot is aligned. Honor the guarantees of the non-persistent constructor
