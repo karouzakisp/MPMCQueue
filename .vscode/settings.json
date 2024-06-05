@@ -1,9 +1,11 @@
 {
     "editor.formatOnSave": true,
+    "C_Cpp.default.compilerPath": "/usr/bin/g++-11",
     "files.associations": {
         "*.alpha": "javascript",
         "*.module": "php",
         "new": "cpp",
-        "type_traits": "cpp"
+        "type_traits": "cpp",
+        "*.tcc": "cpp"
     }
 }

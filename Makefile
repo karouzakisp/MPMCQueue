@@ -1,8 +1,11 @@
+VERIFY := 1
+PROFILE := 1
+
 INCLUDE_DIR := include
 SRC_DIR := src
 BUILD_DIR := build
 
-CC := g++
+CC := g++-11
 # CFLAGS := -g -Wall -pthread -I$(INCLUDE_DIR) -O0 #-O3
 CXXFLAGS := -I$(INCLUDE_DIR) -Wall -Wextra -Wshadow -Wnon-virtual-dtor -Wpedantic \
 -Wold-style-cast -Wcast-align -Woverloaded-virtual -Wconversion -Wsign-conversion \
@@ -13,9 +16,12 @@ NOCXXFLAGSRECOVER := -Wno-invalid-offsetof
 NOCXXFLAGS := -Wno-old-style-cast -Wno-sign-conversion -Wno-shadow -Wno-conversion -Wno-unused-parameter -Wno-vla -Wno-invalid-offsetof
 LDLIBS := -lpthread -lm -lpmemobj
 
-VERIFY = 1
 ifeq (${VERIFY}, 1)
 	CXXFLAGS += -DVERIFY
+endif
+
+ifeq (${PROFILE}, 1)
+	CXXFLAGS += -pg
 endif
 
 SRCS := $(SRC_DIR)/halfhalf.c $(SRC_DIR)/pairwise.c $(SRC_DIR)/harness.cpp
