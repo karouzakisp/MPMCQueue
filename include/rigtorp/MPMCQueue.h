@@ -186,6 +186,19 @@ private:
   static_assert(std::is_nothrow_destructible<T>::value,
                 "T must be nothrow destructible");
 
+  auto CheckPmemSupport() -> bool {
+    const std::string tmpPath = poolPath_ + "_tmp";
+    std::size_t mappedLen;
+    int isPmem;
+    void* addr = pmem_map_file(tmpPath.data(), 1, PMEM_FILE_CREATE, 0666, &mappedLen, &isPmem);
+    assert(addr);
+    int error = pmem_unmap(addr, mappedLen);
+    assert(!error);
+    error = std::system(("rm " + tmpPath).data());
+    assert(!error);
+    return isPmem;
+  }
+
   auto RecoverValidatePre(std::span<const PSlot> slots) -> bool {
     bool preCondition;
     const auto [min, max] = std::ranges::minmax_element(slots, [](const auto& a, const auto& b) { return a.get_ro().turn < b.get_ro().turn; });
@@ -328,9 +341,7 @@ private:
           } */
     }
     pSlots_ = rootPSlots.get();
-    //TODO: This returns 0. Why?
-    bool isPmem = pmem_is_pmem(pop_.root()->pSlots_.get(), (5 + 1) * sizeof(PSlot));
-    std::cout << "MPMC Persistent Memory Support: " << isPmem << "\n";
+    std::cout << "MPMC Persistent Memory Support: " << CheckPmemSupport() << "\n";
 
     // TODO: Make sure each pSlot is aligned. Honor the guarantees of the non-persistent constructor
     static_assert(
