@@ -35,7 +35,7 @@ static long nops;
 #endif
 
 // #define SZ 100'000'000
-#define SZ 1'000'000
+#define SZ 10'000
 
 static pthread_barrier_t barrier;
 static double times[MAX_ITERS];

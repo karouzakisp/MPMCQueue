@@ -22,7 +22,8 @@ struct Slots : public std::vector<VSlot> {
     for (auto i = 0u; i < span.size(); ++i) {
       const auto& pSlot = span[i];
       this->at(i).turn = pSlot.get_ro().turn.load();
-      Type st = *reinterpret_cast<const Type*>(&(pSlot.get_ro().storage));
+      //   Type st = *reinterpret_cast<const Type*>(&(pSlot.get_ro().storage));
+      Type st = pSlot.get_ro().storage;
       this->at(i).storage = st;
     }
   }

@@ -134,33 +134,15 @@ struct Slot {
   typename std::aligned_storage<sizeof(T), alignof(T)>::type storage;
 };
 
-/* template <typename T>
-struct MySlot {
-  ~MySlot() noexcept {
-    if (turn & 1) {
-      destroy();
-    }
-  }
-
-  template <typename... Args>
-  void construct(Args&&... args) noexcept {
-    static_assert(std::is_nothrow_constructible<T, Args&&...>::value,
-                  "T must be nothrow constructible with Args&&...");
-    new (&storage) T(std::forward<Args>(args)...);
-  }
-
-  void destroy() noexcept {
-    static_assert(std::is_nothrow_destructible<T>::value,
-                  "T must be nothrow destructible");
-    reinterpret_cast<T*>(&storage)->~T();
-  }
-
-  T&& move() noexcept { return reinterpret_cast<T&&>(storage); }
+template <typename T>
+struct SimpleSlot {
+  void construct(T val) { storage = val; }
+  T move() const { return storage; }
 
   // Align to avoid false sharing between adjacent slots
   alignas(hardwareInterferenceSize) std::atomic<size_t> turn = {0};
-  typename std::aligned_storage<sizeof(T), alignof(T)>::type storage;
-}; */
+  alignas(hardwareInterferenceSize) T storage{};
+};
 
 template <typename T, typename Allocator = AlignedAllocator<Slot<T>>>
 class Queue {
@@ -170,7 +152,8 @@ public:
     T storage{};
     bool operator==(const VSlot&) const = default;
   };
-  using PSlot = pmem::obj::p<Slot<T>>; // only persist slot
+  //   using PSlot = pmem::obj::p<Slot<T>>;
+  using PSlot = pmem::obj::p<SimpleSlot<T>>;
   using PSlotArray = PSlot[];
   using PSlotArrayPPtr = pmem::obj::persistent_ptr<PSlotArray>;
 
@@ -316,8 +299,8 @@ private:
     }
     const auto layout = std::filesystem::path{poolPath_}.filename().string();
     if (std::filesystem::exists(poolPath_) == false) {
-      const std::size_t POOL_SIZE = 1024 * 1024 * 1024; // 1Gb
-      pop_ = RootPool::create(poolPath_, layout, POOL_SIZE);
+      //   const std::size_t POOL_SIZE = 1024 * 1024 * 1024; // 1Gb
+      pop_ = RootPool::create(poolPath_, layout, PMEMOBJ_MIN_POOL);
       pop_.close();
     }
     int checkPool = RootPool::check(poolPath_, layout);
@@ -327,6 +310,8 @@ private:
     }
     pop_ = RootPool::open(poolPath_, layout);
     auto& rootPSlots = pop_.root()->pSlots_;
+    const auto bytes = sizeof(PSlot) * (capacity_ + 1);
+    assert(bytes < PMEMOBJ_MIN_POOL);
     if (rootPSlots == nullptr) {
       // Allocate one extra slot to prevent false sharing on the last slot
       pmem::obj::make_persistent_atomic<PSlotArray>(pop_, rootPSlots, capacity_ + 1);
@@ -342,6 +327,13 @@ private:
     }
     pSlots_ = rootPSlots.get();
     std::cout << "MPMC Persistent Memory Support: " << CheckPmemSupport() << "\n";
+
+    // std::cout << "PSlot size: " << sizeof(PSlot) << "\n";
+    // std::cout << "Queue size: " << sizeof(Queue) << "\n";
+    // for (auto i = 0u; i < 3; ++i) {
+    //   std::cout << "[" << i << "]: " << (uint64_t)(pSlots_ + i) << " size: " << (char*)(pSlots_ + (i + 1u)) - (char*)(pSlots_ + i) << "\n";
+    //   std::cout << "[" << i << "] turn: " << (uint64_t) & (pSlots_[i].get_ro().turn) << " storage: " << (uint64_t) & (pSlots_[i].get_ro().storage) << "\n";
+    // }
 
     // TODO: Make sure each pSlot is aligned. Honor the guarantees of the non-persistent constructor
     static_assert(
