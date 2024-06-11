@@ -10,8 +10,8 @@
             "request": "launch",
             "program": "${workspaceFolder}/build/mpmcqueue_bench",
             "args": [
-                "8",
-                "2"
+                "48",
+                "7"
             ],
             "stopAtEntry": false,
             "cwd": "${fileDirname}",
