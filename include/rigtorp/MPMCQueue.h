@@ -221,8 +221,8 @@ private:
       auto& v = vSlots[i];
       p.get_rw().turn.store(v.turn);
       p.get_rw().construct(v.storage);
+      pool.persist(p);
     }
-    // pool.persist(pSlotArray.get(), sz);
     return pSlots;
   }
 

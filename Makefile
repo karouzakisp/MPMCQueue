@@ -1,5 +1,5 @@
 VERIFY := 1
-PROFILE := 1
+PROFILE := 0
 
 INCLUDE_DIR := include
 SRC_DIR := src
