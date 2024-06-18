@@ -14,7 +14,7 @@
 #include <unistd.h>
 
 #ifndef LOGN_OPS
-#define LOGN_OPS 2
+#define LOGN_OPS 7
 #endif
 
 static long nops;
@@ -44,7 +44,8 @@ static double covs[MAX_ITERS];
 static volatile int target;
 
 const char* PoolPath = "/mnt/pmem0/myrontsa/MPMC";
-rigtorp::MPMCQueue<void*> q(SZ, true, PoolPath);
+// rigtorp::MPMCQueue<void*> q(SZ, true, PoolPath);
+rigtorp::MPMCQueue<void*> q(SZ, false);
 
 static size_t elapsed_time(size_t us) {
   struct timeval t;
@@ -125,10 +126,10 @@ void* benchmark(int id, int nprocs) {
 
   int i;
   for (i = 0; i < nops / nprocs; ++i) {
-    q.push_p(val);
+    q.push(val);
     delay_exec(&state);
 
-    q.pop_p(val);
+    q.pop(val);
     delay_exec(&state);
   }
 

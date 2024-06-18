@@ -175,7 +175,7 @@ private:
     int isPmem;
     void* addr = pmem_map_file(tmpPath.data(), 1, PMEM_FILE_CREATE, 0666, &mappedLen, &isPmem);
     assert(addr);
-    int error = pmem_unmap(addr, mappedLen);
+    [[maybe_unused]] int error = pmem_unmap(addr, mappedLen);
     assert(!error);
     error = std::system(("rm " + tmpPath).data());
     assert(!error);
@@ -310,7 +310,7 @@ private:
     }
     pop_ = RootPool::open(poolPath_, layout);
     auto& rootPSlots = pop_.root()->pSlots_;
-    const auto bytes = sizeof(PSlot) * (capacity_ + 1);
+    [[maybe_unused]] const auto bytes = sizeof(PSlot) * (capacity_ + 1);
     assert(bytes < PMEMOBJ_MIN_POOL);
     if (rootPSlots == nullptr) {
       // Allocate one extra slot to prevent false sharing on the last slot
@@ -405,6 +405,13 @@ public:
     pop_.persist(slot);
   }
 
+  void pop(T& v) noexcept {
+    if (isPersistent_)
+      pop_p(v);
+    else
+      pop_v(v);
+  }
+
   void pop_p(T& v) noexcept {
     auto const tail = tail_.fetch_add(1);
     PSlot& slot = pSlots_[idx(tail)];
@@ -418,7 +425,7 @@ public:
   }
 
   template <typename... Args>
-  void emplace(Args&&... args) noexcept {
+  void emplace_v(Args&&... args) noexcept {
     static_assert(std::is_nothrow_constructible<T, Args&&...>::value,
                   "T must be nothrow constructible with Args&&...");
     auto const head = head_.fetch_add(1);
@@ -453,15 +460,31 @@ public:
   }
 
   void push(const T& v) noexcept {
-    static_assert(std::is_nothrow_copy_constructible<T>::value,
-                  "T must be nothrow copy constructible");
-    emplace(v);
+    if (isPersistent_)
+      push_p(v);
+    else
+      push_v(v);
   }
   template <typename P,
             typename = typename std::enable_if<
                 std::is_nothrow_constructible<T, P&&>::value>::type>
   void push(P&& v) noexcept {
-    emplace(std::forward<P>(v));
+    if (isPersistent_)
+      push_p(v);
+    else
+      push_v(v);
+  }
+
+  void push_v(const T& v) noexcept {
+    static_assert(std::is_nothrow_copy_constructible<T>::value,
+                  "T must be nothrow copy constructible");
+    emplace_v(v);
+  }
+  template <typename P,
+            typename = typename std::enable_if<
+                std::is_nothrow_constructible<T, P&&>::value>::type>
+  void push_v(P&& v) noexcept {
+    emplace_v(std::forward<P>(v));
   }
 
   bool try_push(const T& v) noexcept {
@@ -488,7 +511,7 @@ public:
     emplace_p(std::forward<P>(v));
   }
 
-  void pop(T& v) noexcept {
+  void pop_v(T& v) noexcept {
     auto const tail = tail_.fetch_add(1);
     auto& slot = slots_[idx(tail)];
     while (turn(tail) * 2 + 1 != slot.turn.load(LoadMemoryOrder))

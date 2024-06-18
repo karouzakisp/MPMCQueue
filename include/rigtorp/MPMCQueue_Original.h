@@ -168,7 +168,7 @@ public:
   Queue& operator=(const Queue&) = delete;
 
   template <typename... Args>
-  void emplace(Args&&... args) noexcept {
+  void emplace_v(Args&&... args) noexcept {
     static_assert(std::is_nothrow_constructible<T, Args&&...>::value,
                   "T must be nothrow constructible with Args&&...");
     auto const head = head_.fetch_add(1);
@@ -202,17 +202,17 @@ public:
     }
   }
 
-  void push(const T& v) noexcept {
+  void push_v(const T& v) noexcept {
     static_assert(std::is_nothrow_copy_constructible<T>::value,
                   "T must be nothrow copy constructible");
-    emplace(v);
+    emplace_v(v);
   }
 
   template <typename P,
             typename = typename std::enable_if<
                 std::is_nothrow_constructible<T, P&&>::value>::type>
-  void push(P&& v) noexcept {
-    emplace(std::forward<P>(v));
+  void push_v(P&& v) noexcept {
+    emplace_v(std::forward<P>(v));
   }
 
   bool try_push(const T& v) noexcept {
@@ -228,7 +228,7 @@ public:
     return try_emplace(std::forward<P>(v));
   }
 
-  void pop(T& v) noexcept {
+  void pop_v(T& v) noexcept {
     auto const tail = tail_.fetch_add(1);
     auto& slot = slots_[idx(tail)];
     while (turn(tail) * 2 + 1 != slot.turn.load(std::memory_order_acquire))

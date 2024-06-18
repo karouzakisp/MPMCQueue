@@ -1,5 +1,6 @@
-VERIFY := 1
-PROFILE := 1
+DEBUG := 0
+VERIFY := 0
+PROFILE := 0
 
 INCLUDE_DIR := include
 SRC_DIR := src
@@ -11,10 +12,16 @@ CXXFLAGS := -I$(INCLUDE_DIR) -Wall -Wextra -Wshadow -Wnon-virtual-dtor -Wpedanti
 -Wold-style-cast -Wcast-align -Woverloaded-virtual -Wconversion -Wsign-conversion \
 -Wmisleading-indentation -Wduplicated-cond -Wduplicated-branches -Wlogical-op \
 -Wnull-dereference -Wuseless-cast -Wdouble-promotion -Wformat=2 -Wunused \
--std=c++23 -g3 -O0 #-O3
+-std=c++23 -g3
 NOCXXFLAGSRECOVER := -Wno-invalid-offsetof
 NOCXXFLAGS := -Wno-old-style-cast -Wno-sign-conversion -Wno-shadow -Wno-conversion -Wno-unused-parameter -Wno-vla -Wno-invalid-offsetof
 LDLIBS := -lpthread -lm -lpmemobj -lpmem
+
+ifeq (${DEBUG}, 1)
+	CXXFLAGS += -O0
+else
+	CXXFLAGS += -O3 -DNDEBUG
+endif
 
 ifeq (${VERIFY}, 1)
 	CXXFLAGS += -DVERIFY
