@@ -1,3 +1,53 @@
+# HY586 Project Section
+- Make sure NVDimms are properly setup. While running the benchmarks, make sure to notice the `Persistent Memory Support` message.
+- Edit the persistent pool path to point to a valid location in NVM. It appears in 2 locations
+```
+// src/harness.cpp, PoolPath variable
+const char* PoolPath = "/mnt/pmem0/geopat/MPMC";
+// src/RecoverTest.cpp, filePath variable
+const std::string filepath = "/mnt/pmem0/geopat/RecoverTest";
+```
+- Remove any leftover NVM files/pools
+```
+rm /mnt/pmem0/geopat/MPMC;
+rm /mnt/pmem0/geopat/RecoverTest;
+```
+- Select among volatile or persistent implementation and build
+```
+// in src/harness.cpp
+Line 47: rigtorp::MPMCQueue<void*> q(SZ, true, PoolPath); <-- Uncomment for persistent implementation
+Line 48: rigtorp::MPMCQueue<void*> q(SZ, false); <-- Uncomment for volatile implementation
+
+//in console
+make
+```
+- Run script to produce benchmark times
+```
+chmod +x benchmark
+TESTS=./build/mpmcqueue_bench PROCS=1:2:4:8:16:32:48:64:96 ./benchmark
+//results in stdout
+```
+(regarding results format: The first column of benchmark's output is the number threads. Then every two columns are the *mean running time* and *margin of error* for each implementation)
+
+- Produce plot. Copy mean of elapsed times to your own `MyTraces.csv` and use python to run `plot.py`. Consult project submit report to find `plot.py` and a default `Traces.csv`.
+```
+// Install pip and latest version of python
+pip install pandas
+pip install matplotlib
+pip install seaborn
+// Copy mean of elapsed times to your own `MyTraces.csv`
+python plot.py MyTraces.csv
+// results in figure.pdf
+```
+
+## Other options
+- For benchmark result validation, set `VERIFY := 1` in `Makefile`
+- To edit benchmark workload, edit the pre-processor definition `LOGN_OPS` in `src/harness.c`
+- To independently run a benchmark
+```
+./build/mpmcqueue_bench THREAD_NUM LOGN_OPS
+```
+
 # MPMCQueue.h
 
 ![C/C++ CI](https://github.com/rigtorp/MPMCQueue/workflows/C/C++%20CI/badge.svg)
