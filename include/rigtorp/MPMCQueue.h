@@ -290,17 +290,18 @@ private:
     }
     allocator_.deallocate(slots_, capacity_ + 1);
   }
-
   void QueueInitPersistent() {
     if (poolPath_.empty())
       throw std::invalid_argument("invalid pool path");
     if (capacity_ < 1) {
       throw std::invalid_argument("capacity < 1");
     }
+    constexpr std::size_t POOL_SIZE = 1024ULL * 1024ULL * 1024ULL * 16; // 16Gb
+    const std::size_t capacity_bytes = sizeof(PSlot) * (capacity_ + 1);
+    if (POOL_SIZE <= capacity_bytes) throw std::invalid_argument("capacity exceeds pool size");
     const auto layout = std::filesystem::path{poolPath_}.filename().string();
     if (std::filesystem::exists(poolPath_) == false) {
-      //   const std::size_t POOL_SIZE = 1024 * 1024 * 1024; // 1Gb
-      pop_ = RootPool::create(poolPath_, layout, PMEMOBJ_MIN_POOL);
+      pop_ = RootPool::create(poolPath_, layout, POOL_SIZE);
       pop_.close();
     }
     int checkPool = RootPool::check(poolPath_, layout);
@@ -310,8 +311,6 @@ private:
     }
     pop_ = RootPool::open(poolPath_, layout);
     auto& rootPSlots = pop_.root()->pSlots_;
-    [[maybe_unused]] const auto bytes = sizeof(PSlot) * (capacity_ + 1);
-    assert(bytes < PMEMOBJ_MIN_POOL);
     if (rootPSlots == nullptr) {
       // Allocate one extra slot to prevent false sharing on the last slot
       pmem::obj::make_persistent_atomic<PSlotArray>(pop_, rootPSlots, capacity_ + 1);

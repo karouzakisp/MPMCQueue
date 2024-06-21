@@ -34,7 +34,7 @@ static long nops;
 #define COV_THRESHOLD 0.02
 #endif
 
-// #define SZ 100'000'000
+// #define SZ 10'000'000
 #define SZ 10'000
 
 static pthread_barrier_t barrier;
@@ -44,8 +44,8 @@ static double covs[MAX_ITERS];
 static volatile int target;
 
 const char* PoolPath = "/mnt/pmem0/myrontsa/MPMC";
-// rigtorp::MPMCQueue<void*> q(SZ, true, PoolPath);
-rigtorp::MPMCQueue<void*> q(SZ, false);
+rigtorp::MPMCQueue<void*> q(SZ, true, PoolPath);
+// rigtorp::MPMCQueue<void*> q(SZ, false);
 
 static size_t elapsed_time(size_t us) {
   struct timeval t;

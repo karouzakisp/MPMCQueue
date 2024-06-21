@@ -41,6 +41,8 @@ python plot.py MyTraces.csv
 ```
 
 ## Other options
+
+- To change the max capacity of MPMC, edit the pre-processor definition `SZ` in `src/harness.c`
 - For benchmark result validation, set `VERIFY := 1` in `Makefile`
 - To edit benchmark workload, edit the pre-processor definition `LOGN_OPS` in `src/harness.c`
 - To independently run a benchmark
