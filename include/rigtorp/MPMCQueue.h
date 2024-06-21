@@ -356,6 +356,8 @@ private:
     rootPSlots = nullptr;
     pop_.root().persist();
     pop_.close();
+    int err = std::system(("rm -f " + poolPath_).data());
+    if (err) throw std::runtime_error("error on pool deletion");
   }
 
 public:
