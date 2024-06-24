@@ -29,7 +29,7 @@ TESTS=./build/mpmcqueue_bench PROCS=1:2:4:8:16:32:48:64:96 ./benchmark
 ```
 (regarding results format: The first column of benchmark's output is the number threads. Then every two columns are the *mean running time* and *margin of error* for each implementation)
 
-- Produce plot. Copy mean of elapsed times to your own `MyTraces.csv` and use python to run `plot.py`. Consult project submit report to find `plot.py` and a default `Traces.csv`.
+- Produce plot. Copy mean of elapsed times to your own `MyTraces.csv` and use python to generate the plot. Consult project submit report to find the plot generation scripts.
 ```
 // Install pip and latest version of python
 pip install pandas
@@ -37,7 +37,7 @@ pip install matplotlib
 pip install seaborn
 // Copy mean of elapsed times to your own `MyTraces.csv`
 python plot.py MyTraces.csv
-// results in figure.pdf
+// results in MyTraces.pdf
 ```
 
 ## Other options
